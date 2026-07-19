@@ -23,22 +23,31 @@ final class CommanderController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
+      final loadedProfile = await _client.getProfile();
+      final scopes = loadedProfile.scopes.toSet();
       final values = await Future.wait<Object>([
-        _client.getProfile(),
         _client.getOverview(),
         _client.getCatalog(),
-        _client.getJobs(),
-        _client.getFleet(),
-        _client.getSettings(),
-        _client.getActivity(),
+        scopes.contains('jobs:read')
+            ? _client.getJobs()
+            : Future.value(const <CommanderJob>[]),
+        scopes.contains('fleet:read')
+            ? _client.getFleet()
+            : Future.value(const <FleetNode>[]),
+        scopes.contains('config:read')
+            ? _client.getSettings()
+            : Future.value(const <BrainSetting>[]),
+        scopes.contains('activity:read')
+            ? _client.getActivity()
+            : Future.value(const <ActivityEvent>[]),
       ]);
-      profile = values[0] as BrainProfile;
-      overview = values[1] as BrainOverview;
-      catalog = values[2] as List<ModelCapability>;
-      jobs = values[3] as List<CommanderJob>;
-      fleet = values[4] as List<FleetNode>;
-      settings = values[5] as List<BrainSetting>;
-      activity = values[6] as List<ActivityEvent>;
+      profile = loadedProfile;
+      overview = values[0] as BrainOverview;
+      catalog = values[1] as List<ModelCapability>;
+      jobs = values[2] as List<CommanderJob>;
+      fleet = values[3] as List<FleetNode>;
+      settings = values[4] as List<BrainSetting>;
+      activity = values[5] as List<ActivityEvent>;
     } catch (caught) {
       error = caught;
     } finally {
@@ -52,7 +61,9 @@ final class CommanderController extends ChangeNotifier {
     notifyListeners();
     try {
       final job = await _client.submitJob(request);
-      jobs = await _client.getJobs();
+      if (profile?.scopes.contains('jobs:read') ?? false) {
+        jobs = await _client.getJobs();
+      }
       overview = await _client.getOverview();
       return job;
     } finally {
@@ -65,5 +76,20 @@ final class CommanderController extends ChangeNotifier {
     final paired = await _client.pair(request);
     await load();
     return paired;
+  }
+
+  Future<void> forgetPairing() async {
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _client.forgetPairing();
+    } catch (caught) {
+      error = caught;
+      loading = false;
+      notifyListeners();
+      return;
+    }
+    await load();
   }
 }

@@ -146,6 +146,7 @@ abstract interface class BrainClient {
   Future<List<BrainSetting>> getSettings();
   Future<List<ActivityEvent>> getActivity();
   Future<CommanderJob> submitJob(JobRequest request);
+  Future<void> forgetPairing();
 
   /// Exchanges a one-time enrollment for a locally generated, revocable
   /// public-key device identity.

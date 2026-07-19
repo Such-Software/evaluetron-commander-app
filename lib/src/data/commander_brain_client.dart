@@ -9,8 +9,12 @@ import '../security/secure_credential_vault.dart';
 import 'fixture_brain_client.dart';
 
 final class CommanderTransportException implements Exception {
-  const CommanderTransportException(this.message);
+  const CommanderTransportException(
+    this.message, {
+    this.authorizationRejected = false,
+  });
   final String message;
+  final bool authorizationRejected;
 
   @override
   String toString() => message;
@@ -130,6 +134,7 @@ final class CommanderBrainClient implements BrainClient {
       if (response.statusCode == 401) {
         throw const CommanderTransportException(
           'Commander authorization was rejected. Pair again or review device scopes.',
+          authorizationRejected: true,
         );
       }
       throw CommanderTransportException(
@@ -159,6 +164,11 @@ final class CommanderBrainClient implements BrainClient {
 
   Future<BrainProfile> _profileFor(DeviceCredential credential) async {
     final response = await _signedGet(credential, '/api/commander/v1/profile');
+    if (response['apiVersion'] != 1) {
+      throw const CommanderTransportException(
+        'The Brain uses an unsupported Commander API version.',
+      );
+    }
     final brain = _map(response['brain']);
     final device = _map(response['device']);
     final scopes = _strings(device['scopes']);
@@ -306,6 +316,26 @@ final class CommanderBrainClient implements BrainClient {
   }
 
   @override
+  Future<void> forgetPairing() async {
+    final credential = await _credential();
+    if (credential == null) return;
+    try {
+      await _request(
+        origin: credential.brainOrigin,
+        method: 'POST',
+        path: '/api/commander/v1/revoke',
+        body: const [],
+        credential: credential,
+      );
+    } on CommanderTransportException catch (error) {
+      if (!error.authorizationRejected) rethrow;
+    }
+    await _vault.remove(credential.brainOrigin);
+    _catalog = const [];
+    _credentialFuture = Future.value(null);
+  }
+
+  @override
   Future<List<BrainSetting>> getSettings() async {
     final credential = await _credential();
     if (credential == null) return _fixture.getSettings();
@@ -408,6 +438,11 @@ final class CommanderBrainClient implements BrainClient {
       body: body,
       enrollmentToken: enrollment.token,
     );
+    if (response['apiVersion'] != 1) {
+      throw const CommanderTransportException(
+        'The Brain uses an unsupported Commander API version.',
+      );
+    }
     final device = _map(response['device']);
     final credential = DeviceCredential(
       brainOrigin: enrollment.brainOrigin,

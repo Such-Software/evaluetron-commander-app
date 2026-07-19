@@ -34,6 +34,9 @@ final class FixtureBrainClient implements BrainClient {
   }
 
   @override
+  Future<void> forgetPairing() async {}
+
+  @override
   Future<BrainProfile> getProfile() => _answer(
     BrainProfile(
       name: 'Evaluetron fixture brain',

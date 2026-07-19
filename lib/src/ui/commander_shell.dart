@@ -45,7 +45,11 @@ final class _CommanderShellState extends State<CommanderShell> {
           return const _LoadingView();
         }
         if (widget.controller.error case final error?) {
-          return _FailureView(error: error, retry: widget.controller.load);
+          return _FailureView(
+            error: error,
+            retry: widget.controller.load,
+            resetPairing: widget.controller.forgetPairing,
+          );
         }
         return Shortcuts(
           shortcuts: <ShortcutActivator, Intent>{
@@ -343,9 +347,14 @@ final class _LoadingView extends StatelessWidget {
 }
 
 final class _FailureView extends StatelessWidget {
-  const _FailureView({required this.error, required this.retry});
+  const _FailureView({
+    required this.error,
+    required this.retry,
+    required this.resetPairing,
+  });
   final Object error;
   final VoidCallback retry;
+  final VoidCallback resetPairing;
 
   @override
   Widget build(BuildContext context) {
@@ -367,10 +376,22 @@ final class _FailureView extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text('$error', textAlign: TextAlign.center),
                 const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: retry,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Try again'),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: resetPairing,
+                      icon: const Icon(Icons.phonelink_erase),
+                      label: const Text('Remove paired Brain'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: retry,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try again'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -732,6 +753,8 @@ final class _RunPageState extends State<RunPage> {
     final selected = widget.controller.catalog
         .where((item) => item.id == _selectedId)
         .firstOrNull;
+    final canSubmit =
+        widget.controller.profile?.scopes.contains('jobs:create') ?? false;
     return PageFrame(
       title: 'Run a model',
       subtitle:
@@ -776,6 +799,26 @@ final class _RunPageState extends State<RunPage> {
               },
             ),
             const SizedBox(height: 24),
+            if (!canSubmit) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lock_outline),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'This Commander can inspect capabilities but is not '
+                          'authorized to submit jobs.',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             if (selected != null)
               Card(
                 child: Padding(
@@ -820,7 +863,8 @@ final class _RunPageState extends State<RunPage> {
                             style: Theme.of(context).textTheme.labelLarge,
                           ),
                           FilledButton.icon(
-                            onPressed: widget.controller.submitting
+                            onPressed:
+                                widget.controller.submitting || !canSubmit
                                 ? null
                                 : () => _submit(selected),
                             icon: widget.controller.submitting
@@ -1478,6 +1522,11 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
         ),
       ),
       actions: [
+        if (profile.mode == ConnectionMode.paired)
+          TextButton(
+            onPressed: _forgetPairing,
+            child: const Text('Revoke and remove'),
+          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Close'),
@@ -1515,6 +1564,12 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
     if (scanned == null || !mounted) return;
     _enrollment.text = scanned;
     setState(() => _message = null);
+  }
+
+  Future<void> _forgetPairing() async {
+    await widget.controller.forgetPairing();
+    if (!mounted || widget.controller.error != null) return;
+    Navigator.pop(context);
   }
 }
 

@@ -1,5 +1,6 @@
 import 'package:evaluetron_commander_app/src/app.dart';
 import 'package:evaluetron_commander_app/src/data/fixture_brain_client.dart';
+import 'package:evaluetron_commander_app/src/domain/brain_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -70,4 +71,114 @@ void main() {
 
     expect(find.textContaining('no live Brain transport'), findsOneWidget);
   });
+
+  testWidgets('failed paired state can return safely to pairing', (
+    tester,
+  ) async {
+    final client = _RecoveringBrainClient();
+
+    await tester.pumpWidget(CommanderApp(client: client));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Commander could not load'), findsOneWidget);
+    await tester.tap(find.text('Remove paired Brain'));
+    await tester.pumpAndSettle();
+
+    expect(client.paired, isFalse);
+    expect(find.text('Commander could not load'), findsNothing);
+    expect(find.text('Fixture'), findsWidgets);
+  });
+
+  testWidgets('read-only pairing loads without requesting optional scopes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(CommanderApp(client: _ReadOnlyBrainClient()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Commander could not load'), findsNothing);
+    await tester.tap(find.byIcon(Icons.play_circle_outline));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('not authorized to submit jobs'),
+      findsOneWidget,
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is FilledButton && widget.onPressed == null,
+      ),
+      findsOneWidget,
+    );
+  });
+}
+
+class _RecoveringBrainClient implements BrainClient {
+  final FixtureBrainClient _fixture = FixtureBrainClient();
+  bool paired = true;
+
+  @override
+  Future<void> forgetPairing() async {
+    paired = false;
+  }
+
+  @override
+  Future<List<ActivityEvent>> getActivity() => _fixture.getActivity();
+
+  @override
+  Future<List<ModelCapability>> getCatalog() => _fixture.getCatalog();
+
+  @override
+  Future<List<FleetNode>> getFleet() => _fixture.getFleet();
+
+  @override
+  Future<List<CommanderJob>> getJobs() => _fixture.getJobs();
+
+  @override
+  Future<BrainOverview> getOverview() => _fixture.getOverview();
+
+  @override
+  Future<BrainProfile> getProfile() {
+    if (paired) throw StateError('Paired Brain authorization was rejected.');
+    return _fixture.getProfile();
+  }
+
+  @override
+  Future<List<BrainSetting>> getSettings() => _fixture.getSettings();
+
+  @override
+  Future<BrainProfile> pair(PairingRequest request) => _fixture.pair(request);
+
+  @override
+  Future<CommanderJob> submitJob(JobRequest request) =>
+      _fixture.submitJob(request);
+}
+
+final class _ReadOnlyBrainClient extends _RecoveringBrainClient {
+  _ReadOnlyBrainClient() {
+    paired = false;
+  }
+
+  @override
+  Future<BrainProfile> getProfile() async => BrainProfile(
+    name: 'Read-only Brain',
+    endpoint: Uri.parse('https://brain.example.com'),
+    mode: ConnectionMode.paired,
+    identity: 'device_read_only',
+    scopes: const ['brain:read'],
+  );
+
+  @override
+  Future<List<ActivityEvent>> getActivity() =>
+      throw StateError('activity:read was not granted');
+
+  @override
+  Future<List<FleetNode>> getFleet() =>
+      throw StateError('fleet:read was not granted');
+
+  @override
+  Future<List<CommanderJob>> getJobs() =>
+      throw StateError('jobs:read was not granted');
+
+  @override
+  Future<List<BrainSetting>> getSettings() =>
+      throw StateError('config:read was not granted');
 }
