@@ -4,7 +4,7 @@ Private, adaptive operator client for an Evaluetron Brain. Commander is a
 native Flutter application for phones, tablets, and keyboard/mouse desktops;
 it is not a web admin console wrapped in a WebView.
 
-The current milestone is an honest fixture-backed product shell. It exercises
+The current milestone is a fixture-backed product shell. It exercises
 the intended screens and typed client boundary without claiming a live Brain
 connection. Every fixture surface is visibly labeled, pairing fails closed,
 and no secret is stored.
@@ -29,7 +29,7 @@ SharedPreferences, ordinary files, logs, analytics, or crash reports.
 
 `BrainClient` is the transport-independent application contract.
 `FixtureBrainClient` is deterministic local data for development and tests.
-A future authenticated implementation can replace it without coupling screens
+An authenticated implementation can replace it without coupling screens
 to HTTP or generated API types.
 
 ## Distribution direction

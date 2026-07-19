@@ -150,7 +150,7 @@ abstract interface class BrainClient {
   Future<CommanderJob> submitJob(JobRequest request);
 
   /// A production transport must exchange [request.pairingCode] for a
-  /// hardware-backed, revocable device credential. Fixture clients must fail
-  /// closed instead of pretending that pairing succeeded.
+  /// hardware-backed, revocable device credential. Fixture clients must reject
+  /// pairing because they do not provide an authenticated transport.
   Future<BrainProfile> pair(PairingRequest request);
 }

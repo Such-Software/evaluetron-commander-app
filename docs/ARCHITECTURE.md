@@ -45,7 +45,7 @@ step-up authorization, an explicit confirmation, and append-only audit.
 
 ## Transport adapter requirements
 
-The future live adapter should be generated from a versioned machine-readable
+The production adapter should be generated from a versioned machine-readable
 Brain contract where practical. It must include:
 
 - strict request and response models with bounded decode sizes;

@@ -455,7 +455,7 @@ final class OverviewPage extends StatelessWidget {
     return PageFrame(
       title: 'Good afternoon',
       subtitle:
-          'A calm, scoped view of this Brain and the work it coordinates.',
+          'A scoped operational view of this Brain and the work it coordinates.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

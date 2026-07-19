@@ -26,7 +26,7 @@ void main() {
       expect((await client.getJobs()).first.id, job.id);
     });
 
-    test('never pretends to pair', () {
+    test('rejects pairing when no authenticated transport is configured', () {
       final client = FixtureBrainClient();
 
       expect(
