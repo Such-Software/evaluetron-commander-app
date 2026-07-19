@@ -24,14 +24,14 @@ final class BrainOverview {
   const BrainOverview({
     required this.activeJobs,
     required this.readyNodes,
-    required this.credits,
+    required this.billing,
     required this.successRate,
   });
 
   final int activeJobs;
   final int readyNodes;
-  final int credits;
-  final double successRate;
+  final String billing;
+  final double? successRate;
 }
 
 final class ModelCapability {
@@ -43,6 +43,8 @@ final class ModelCapability {
     required this.creditCost,
     required this.inputLabel,
     required this.inputHint,
+    this.parameterName = 'text',
+    this.model,
   });
 
   final String id;
@@ -52,6 +54,8 @@ final class ModelCapability {
   final int creditCost;
   final String inputLabel;
   final String inputHint;
+  final String parameterName;
+  final String? model;
 }
 
 final class CommanderJob {
@@ -128,15 +132,9 @@ final class JobRequest {
 }
 
 final class PairingRequest {
-  const PairingRequest({
-    required this.endpoint,
-    required this.deviceLabel,
-    required this.pairingCode,
-  });
+  const PairingRequest({required this.enrollmentUri});
 
-  final Uri endpoint;
-  final String deviceLabel;
-  final String pairingCode;
+  final Uri enrollmentUri;
 }
 
 abstract interface class BrainClient {
@@ -149,8 +147,7 @@ abstract interface class BrainClient {
   Future<List<ActivityEvent>> getActivity();
   Future<CommanderJob> submitJob(JobRequest request);
 
-  /// A production transport must exchange [request.pairingCode] for a
-  /// hardware-backed, revocable device credential. Fixture clients must reject
-  /// pairing because they do not provide an authenticated transport.
+  /// Exchanges a one-time enrollment for a locally generated, revocable
+  /// public-key device identity.
   Future<BrainProfile> pair(PairingRequest request);
 }

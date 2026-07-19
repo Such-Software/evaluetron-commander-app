@@ -61,5 +61,9 @@ final class CommanderController extends ChangeNotifier {
     }
   }
 
-  Future<BrainProfile> pair(PairingRequest request) => _client.pair(request);
+  Future<BrainProfile> pair(PairingRequest request) async {
+    final paired = await _client.pair(request);
+    await load();
+    return paired;
+  }
 }

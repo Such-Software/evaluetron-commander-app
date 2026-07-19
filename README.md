@@ -4,10 +4,10 @@ Private, adaptive operator client for an Evaluetron Brain. Commander is a
 native Flutter application for phones, tablets, and keyboard/mouse desktops;
 it is not a web admin console wrapped in a WebView.
 
-The current milestone is a fixture-backed product shell. It exercises
-the intended screens and typed client boundary without claiming a live Brain
-connection. Every fixture surface is visibly labeled, pairing fails closed,
-and no secret is stored.
+The application includes a deterministic fixture mode and a live Brain
+transport. Live pairing creates an Ed25519 device identity, verifies a signed
+profile request, and stores the private seed through the operating-system
+secure store.
 
 ## Product surfaces
 
@@ -21,23 +21,24 @@ and no secret is stored.
 
 ## Security boundary
 
-Production pairing must exchange a short-lived code for a revocable,
-least-privilege device identity. Secret material may only be handled through
+Pairing exchanges a short-lived enrollment for a revocable, least-privilege
+device identity. Secret material is only handled through
 the `SecureCredentialVault` abstraction backed by Keychain, Android Keystore,
 or an equivalent operating-system store. It must never be put in
 SharedPreferences, ordinary files, logs, analytics, or crash reports.
 
 `BrainClient` is the transport-independent application contract.
 `FixtureBrainClient` is deterministic local data for development and tests.
-An authenticated implementation can replace it without coupling screens
-to HTTP or generated API types.
+`CommanderBrainClient` switches from fixture data only after authenticated
+pairing succeeds.
 
 ## Distribution direction
 
 The application targets Android, iOS, macOS, Linux, and Windows. Android and
 iOS packaging is prepared for internal sideload/TestFlight and closed testing;
-store submission still requires production API integration, platform secure
-storage, privacy disclosures, signing, accessibility review, and store assets.
+store submission still requires production API qualification, platform secure
+storage device qualification, privacy disclosures, signing, accessibility
+review, and store assets.
 
 Bundle/application ID: `com.suchsoftware.evaluetron.commander`
 

@@ -21,8 +21,6 @@ android {
 
     defaultConfig {
         applicationId = "com.suchsoftware.evaluetron.commander"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -31,7 +29,7 @@ android {
 
     buildTypes {
         release {
-            // Development builds use the debug key. Release signing is configured separately.
+            // Store releases require an external signing configuration.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

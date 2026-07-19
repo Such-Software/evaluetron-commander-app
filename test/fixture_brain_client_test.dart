@@ -32,9 +32,9 @@ void main() {
       expect(
         () => client.pair(
           PairingRequest(
-            endpoint: Uri.parse('https://brain.example.com'),
-            deviceLabel: 'Test Commander',
-            pairingCode: 'ABCD-1234',
+            enrollmentUri: Uri.parse(
+              'evaluetron-commander://pair?v=1&brain=https%3A%2F%2Fbrain.example.com&token=evc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            ),
           ),
         ),
         throwsUnsupportedError,

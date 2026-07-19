@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../domain/brain_client.dart';
 import '../state/commander_controller.dart';
@@ -482,15 +484,16 @@ final class OverviewPage extends StatelessWidget {
                   ),
                   _MetricCard(
                     width: itemWidth,
-                    label: 'Credits',
-                    value: '${overview.credits}',
+                    label: 'Billing context',
+                    value: overview.billing,
                     icon: Icons.toll_outlined,
                   ),
                   _MetricCard(
                     width: itemWidth,
                     label: 'Success · 24h',
-                    value:
-                        '${(overview.successRate * 100).toStringAsFixed(1)}%',
+                    value: overview.successRate == null
+                        ? 'N/A'
+                        : '${(overview.successRate! * 100).toStringAsFixed(1)}%',
                     icon: Icons.auto_graph_outlined,
                   ),
                 ],
@@ -550,22 +553,23 @@ final class _MetricCard extends StatelessWidget {
             children: [
               Icon(icon, color: Theme.of(context).colorScheme.primary),
               const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      value,
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
-                  ),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -855,7 +859,9 @@ final class _RunPageState extends State<RunPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${job.id} queued in the local fixture. No network request was made.',
+            widget.controller.profile?.mode == ConnectionMode.fixture
+                ? '${job.id} queued in the local fixture. No network request was made.'
+                : '${job.id} was accepted by the paired Brain.',
           ),
           action: SnackBarAction(
             label: 'View jobs',
@@ -1348,16 +1354,12 @@ final class BrainProfileDialog extends StatefulWidget {
 }
 
 final class _BrainProfileDialogState extends State<BrainProfileDialog> {
-  final _endpoint = TextEditingController(text: 'https://brain.example.com');
-  final _deviceLabel = TextEditingController(text: 'My Commander');
-  final _pairingCode = TextEditingController();
+  final _enrollment = TextEditingController();
   String? _message;
 
   @override
   void dispose() {
-    _endpoint.dispose();
-    _deviceLabel.dispose();
-    _pairingCode.dispose();
+    _enrollment.dispose();
     super.dispose();
   }
 
@@ -1378,27 +1380,27 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.science_outlined),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Fixture mode is active. Every value is deterministic '
-                        'local test data; no live API or credential store is '
-                        'implemented in this build.',
+              if (profile.mode == ConnectionMode.fixture)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.science_outlined),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Fixture mode is active. Every value is deterministic '
+                          'local test data and no Brain request is made.',
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               const SizedBox(height: 20),
               Text(
                 profile.name,
@@ -1429,33 +1431,29 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: _endpoint,
-                keyboardType: TextInputType.url,
-                autofillHints: const [AutofillHints.url],
-                decoration: const InputDecoration(
-                  labelText: 'HTTPS Brain endpoint',
-                  prefixIcon: Icon(Icons.language),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _deviceLabel,
-                decoration: const InputDecoration(
-                  labelText: 'Device label',
-                  prefixIcon: Icon(Icons.devices),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _pairingCode,
+                controller: _enrollment,
                 autocorrect: false,
                 enableSuggestions: false,
-                textCapitalization: TextCapitalization.characters,
+                keyboardType: TextInputType.url,
+                minLines: 2,
+                maxLines: 4,
                 decoration: const InputDecoration(
-                  labelText: 'Short-lived pairing code',
-                  prefixIcon: Icon(Icons.password),
+                  labelText: 'Commander enrollment URI',
+                  hintText: 'evaluetron-commander://pair?v=1&brain=…&token=…',
+                  prefixIcon: Icon(Icons.qr_code_2),
                 ),
               ),
+              if (_cameraScanningSupported) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _scanEnrollment,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan pairing QR'),
+                  ),
+                ),
+              ],
               if (_message case final message?) ...[
                 const SizedBox(height: 12),
                 Semantics(
@@ -1470,9 +1468,9 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
               ],
               const SizedBox(height: 12),
               Text(
-                'Production pairing must pin the expected Brain origin, create '
-                'a device key in platform secure storage, exchange the code '
-                'once, and request only approved scopes.',
+                'The Brain origin and one-time token come from the protected '
+                'operator console. Commander creates the private key locally '
+                'and stores it only in the operating-system secure store.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -1494,28 +1492,83 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
   }
 
   Future<void> _pair() async {
-    final endpoint = Uri.tryParse(_endpoint.text.trim());
-    if (endpoint == null ||
-        endpoint.scheme != 'https' ||
-        endpoint.host.isEmpty) {
-      setState(() => _message = 'Enter a valid HTTPS Brain endpoint.');
-      return;
-    }
-    if (_deviceLabel.text.trim().isEmpty || _pairingCode.text.trim().isEmpty) {
-      setState(() => _message = 'Device label and pairing code are required.');
+    final enrollment = Uri.tryParse(_enrollment.text.trim());
+    if (enrollment == null) {
+      setState(() => _message = 'Enter a valid Commander enrollment URI.');
       return;
     }
     try {
-      await widget.controller.pair(
-        PairingRequest(
-          endpoint: endpoint,
-          deviceLabel: _deviceLabel.text.trim(),
-          pairingCode: _pairingCode.text.trim(),
-        ),
-      );
+      await widget.controller.pair(PairingRequest(enrollmentUri: enrollment));
+      if (!mounted) return;
+      Navigator.pop(context);
     } catch (error) {
       if (!mounted) return;
       setState(() => _message = '$error');
     }
+  }
+
+  Future<void> _scanEnrollment() async {
+    final scanned = await showDialog<String>(
+      context: context,
+      builder: (context) => const _EnrollmentScannerDialog(),
+    );
+    if (scanned == null || !mounted) return;
+    _enrollment.text = scanned;
+    setState(() => _message = null);
+  }
+}
+
+bool get _cameraScanningSupported =>
+    kIsWeb ||
+    defaultTargetPlatform == TargetPlatform.android ||
+    defaultTargetPlatform == TargetPlatform.iOS ||
+    defaultTargetPlatform == TargetPlatform.macOS;
+
+final class _EnrollmentScannerDialog extends StatefulWidget {
+  const _EnrollmentScannerDialog();
+
+  @override
+  State<_EnrollmentScannerDialog> createState() =>
+      _EnrollmentScannerDialogState();
+}
+
+final class _EnrollmentScannerDialogState
+    extends State<_EnrollmentScannerDialog> {
+  bool _accepted = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Scan pairing QR'),
+      content: SizedBox(
+        width: 420,
+        height: 420,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: MobileScanner(
+            onDetect: (capture) {
+              if (_accepted) return;
+              final value = capture.barcodes
+                  .map((barcode) => barcode.rawValue)
+                  .whereType<String>()
+                  .where(
+                    (candidate) =>
+                        candidate.startsWith('evaluetron-commander://pair?'),
+                  )
+                  .firstOrNull;
+              if (value == null) return;
+              _accepted = true;
+              Navigator.pop(context, value);
+            },
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
   }
 }

@@ -60,13 +60,10 @@ void main() {
     await tester.tap(find.byTooltip('Open Brain profile'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('no live API or credential store'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Fixture mode is active'), findsOneWidget);
     await tester.enterText(
-      find.widgetWithText(TextField, 'Short-lived pairing code'),
-      'ABCD-1234',
+      find.widgetWithText(TextField, 'Commander enrollment URI'),
+      'evaluetron-commander://pair?v=1&brain=https%3A%2F%2Fbrain.example.com&token=evc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     );
     await tester.tap(find.text('Pair securely'));
     await tester.pumpAndSettle();

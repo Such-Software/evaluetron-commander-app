@@ -8,9 +8,9 @@ leases, configuration policy, and audit events. Client-side validation exists
 for usability only and cannot replace server-side enforcement.
 
 The UI depends on `BrainClient`, not HTTP. The deterministic
-`FixtureBrainClient` makes every screen and workflow testable before an API
-transport exists. It is visibly marked and refuses pairing rather than
-simulating success.
+`FixtureBrainClient` keeps every screen testable without a Brain. The live
+client switches away from visibly marked fixture data only after pairing,
+signed profile verification, and secure credential persistence succeed.
 
 ## Production pairing
 
@@ -18,13 +18,14 @@ simulating success.
    single-purpose pairing challenge.
 2. Commander scans its QR payload or accepts the code and independently
    verifies the expected HTTPS Brain origin.
-3. Commander creates device key material using the platform security adapter.
+3. Commander creates an Ed25519 key pair locally.
 4. The Brain atomically consumes the challenge and issues a revocable device
    identity with explicit Commander scopes.
-5. Commander stores opaque credential material only through
-   `SecureCredentialVault`.
-6. Every request is authenticated, origin-bound, time-bounded, and safe to
-   retry only where the API contract declares idempotency.
+5. Commander proves possession with a signed profile request and stores the
+   private seed only through `SecureCredentialVault`.
+6. Every request signs the method, path, timestamp, nonce, and exact body hash.
+   Accepted nonces persist in PostgreSQL; job requests also carry a signed
+   idempotency key.
 
 There is no fallback to a shared token, local plaintext, SharedPreferences, or
 fixture credentials. If the operating system cannot offer the required
@@ -78,8 +79,8 @@ coordinates snapshots and mutations without teaching widgets about transport.
 As the live API grows, split controllers by feature rather than introducing a
 global mutable service locator.
 
-Tests currently cover phone and desktop adaptation, navigation, fixture job
-submission, fail-closed pairing, deterministic repository behavior, and secret
-redaction. Live-adapter work should add contract tests against an ephemeral
-Brain plus platform integration tests for secure storage and credential
-revocation.
+Tests cover phone and desktop adaptation, navigation, fixture job submission,
+strict enrollment parsing, the cross-runtime signature vector, vault
+serialization, and secret redaction. Release qualification also requires
+contract tests against an ephemeral Brain plus platform integration tests for
+secure storage and credential revocation.

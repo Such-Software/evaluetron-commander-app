@@ -55,7 +55,7 @@ final class FixtureBrainClient implements BrainClient {
     const BrainOverview(
       activeJobs: 1,
       readyNodes: 3,
-      credits: 1240,
+      billing: 'Fixture',
       successRate: .986,
     ),
   );
