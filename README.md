@@ -18,6 +18,7 @@ secure store.
 - Worker fleet visibility and app-based enrollment preview
 - Redacted configuration view
 - Operator-safe activity history
+- Optional, consented managed-Nebula foundation with narrow Brain routing
 
 ## Security boundary
 
@@ -45,6 +46,9 @@ Bundle/application ID: `com.suchsoftware.evaluetron.commander`
 See [architecture](docs/ARCHITECTURE.md) and
 [store readiness](docs/STORE_READINESS.md) for the production boundary and
 remaining release work.
+
+The optional managed-network design and upstream license audit are documented
+in [managed Nebula](docs/MANAGED_NEBULA.md).
 
 ## Development
 

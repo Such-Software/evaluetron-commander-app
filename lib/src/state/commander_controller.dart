@@ -1,14 +1,17 @@
 import 'package:flutter/foundation.dart';
 
 import '../domain/brain_client.dart';
+import '../network/managed_network.dart';
 
 final class CommanderController extends ChangeNotifier {
-  CommanderController(this._client);
+  CommanderController(this._client, this._managedNetwork);
 
   final BrainClient _client;
+  final ManagedNetworkPlatform _managedNetwork;
 
   bool loading = true;
   bool submitting = false;
+  bool networkBusy = false;
   Object? error;
   BrainProfile? profile;
   BrainOverview? overview;
@@ -17,6 +20,9 @@ final class CommanderController extends ChangeNotifier {
   List<FleetNode> fleet = const [];
   List<BrainSetting> settings = const [];
   List<ActivityEvent> activity = const [];
+  ManagedNetworkCapability managedNetworkCapability =
+      const ManagedNetworkCapability.unsupported();
+  TunnelSnapshot tunnel = const TunnelSnapshot.unavailable();
 
   Future<void> load() async {
     loading = true;
@@ -48,10 +54,67 @@ final class CommanderController extends ChangeNotifier {
       fleet = values[3] as List<FleetNode>;
       settings = values[4] as List<BrainSetting>;
       activity = values[5] as List<ActivityEvent>;
+      await refreshManagedNetwork(notify: false);
     } catch (caught) {
       error = caught;
     } finally {
       loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshManagedNetwork({bool notify = true}) async {
+    try {
+      managedNetworkCapability = await _managedNetwork.inspect();
+      tunnel = await _managedNetwork.status();
+    } on Object {
+      managedNetworkCapability = const ManagedNetworkCapability.unsupported();
+      tunnel = const TunnelSnapshot.unavailable();
+    }
+    if (notify) notifyListeners();
+  }
+
+  Future<TunnelConsentResult> requestTunnelConsent() async {
+    if (!managedNetworkCapability.canConnect) {
+      return TunnelConsentResult.unavailable;
+    }
+    networkBusy = true;
+    notifyListeners();
+    try {
+      final result = await _managedNetwork.requestConsent();
+      tunnel = await _managedNetwork.status();
+      return result;
+    } finally {
+      networkBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<TunnelSnapshot> connectManagedNetwork(
+    ManagedNetworkProfile profile,
+  ) async {
+    if (!managedNetworkCapability.canConnect) {
+      return const TunnelSnapshot.unavailable();
+    }
+    networkBusy = true;
+    notifyListeners();
+    try {
+      tunnel = await _managedNetwork.connect(profile);
+      return tunnel;
+    } finally {
+      networkBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<TunnelSnapshot> disconnectManagedNetwork() async {
+    networkBusy = true;
+    notifyListeners();
+    try {
+      tunnel = await _managedNetwork.disconnect();
+      return tunnel;
+    } finally {
+      networkBusy = false;
       notifyListeners();
     }
   }

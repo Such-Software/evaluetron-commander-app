@@ -72,6 +72,14 @@ Brain contract where practical. It must include:
 These adapters are infrastructure dependencies. Screens and domain contracts
 remain platform-neutral.
 
+## Optional managed network
+
+Public signed HTTPS is the baseline Brain path. Commander also defines an
+optional, separately consented managed Nebula path with exact-host routing,
+role-specific enrollment, secure configuration storage, and observable tunnel
+state. The current Android native scaffold fails closed because no audited
+engine is embedded. See [managed Nebula](MANAGED_NEBULA.md).
+
 ## State and testing
 
 `CommanderController` is deliberately small and dependency-injected. It

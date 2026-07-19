@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 
 import 'domain/brain_client.dart';
+import 'network/managed_network.dart';
 import 'state/commander_controller.dart';
 import 'ui/commander_shell.dart';
 
 final class CommanderApp extends StatefulWidget {
-  const CommanderApp({required this.client, super.key});
+  const CommanderApp({
+    required this.client,
+    this.managedNetwork = const UnavailableManagedNetworkPlatform(),
+    super.key,
+  });
 
   final BrainClient client;
+  final ManagedNetworkPlatform managedNetwork;
 
   @override
   State<CommanderApp> createState() => _CommanderAppState();
@@ -19,7 +25,8 @@ final class _CommanderAppState extends State<CommanderApp> {
   @override
   void initState() {
     super.initState();
-    _controller = CommanderController(widget.client)..load();
+    _controller = CommanderController(widget.client, widget.managedNetwork)
+      ..load();
   }
 
   @override

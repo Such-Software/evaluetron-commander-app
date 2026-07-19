@@ -7,6 +7,7 @@ remaining release controls are complete.
 ## Required before TestFlight or Play closed testing
 
 - End-to-end qualification against the production Brain API version
+- Commander-specific managed-network enrollment before enabling Nebula
 - Keychain and Android Keystore device tests, including backup and migration
 - Camera permission, QR pairing, and paste fallback device tests
 - Release signing owned by the organization
@@ -31,6 +32,8 @@ QR scanning, and a paste fallback.
 - Localization decision and complete store metadata
 - Apple privacy manifest and required-reason API inventory
 - Google Play Data safety form and current target-SDK compliance
+- VPN declarations, review metadata, third-party notices, and native tunnel
+  qualification if managed networking is enabled
 - Incident response, credential rotation, and forced-upgrade strategy
 
 The app identifier is fixed as `com.suchsoftware.evaluetron.commander`.

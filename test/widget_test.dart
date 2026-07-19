@@ -1,6 +1,7 @@
 import 'package:evaluetron_commander_app/src/app.dart';
 import 'package:evaluetron_commander_app/src/data/fixture_brain_client.dart';
 import 'package:evaluetron_commander_app/src/domain/brain_client.dart';
+import 'package:evaluetron_commander_app/src/network/managed_network.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -109,6 +110,49 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('managed networking is optional and reports missing engine', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      CommanderApp(
+        client: FixtureBrainClient(),
+        managedNetwork: const _EngineMissingManagedNetwork(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Open Brain profile'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Managed Nebula'));
+    await tester.tap(find.text('Managed Nebula'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Managed network'), findsOneWidget);
+    expect(find.text('Use public signed HTTPS'), findsOneWidget);
+    expect(find.textContaining('native engine not embedded'), findsWidgets);
+    expect(
+      find.textContaining('must not silently replace another VPN'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text('Review system VPN consent'),
+              matching: find.byWidgetPredicate(
+                (widget) => widget is FilledButton,
+              ),
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
 }
 
 class _RecoveringBrainClient implements BrainClient {
@@ -181,4 +225,32 @@ final class _ReadOnlyBrainClient extends _RecoveringBrainClient {
   @override
   Future<List<BrainSetting>> getSettings() =>
       throw StateError('config:read was not granted');
+}
+
+final class _EngineMissingManagedNetwork implements ManagedNetworkPlatform {
+  const _EngineMissingManagedNetwork();
+
+  @override
+  Future<TunnelSnapshot> connect(ManagedNetworkProfile profile) async =>
+      const TunnelSnapshot.unavailable();
+
+  @override
+  Future<TunnelSnapshot> disconnect() async =>
+      const TunnelSnapshot.unavailable();
+
+  @override
+  Future<ManagedNetworkCapability> inspect() async =>
+      const ManagedNetworkCapability(
+        availability: ManagedNetworkAvailability.engineNotInstalled,
+        platform: 'android',
+        vpnServiceDeclared: true,
+        engineVersion: null,
+      );
+
+  @override
+  Future<TunnelConsentResult> requestConsent() async =>
+      TunnelConsentResult.unavailable;
+
+  @override
+  Future<TunnelSnapshot> status() async => const TunnelSnapshot.unavailable();
 }
