@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'brand.dart';
 import 'domain/brain_client.dart';
 import 'network/managed_network.dart';
 import 'state/commander_controller.dart';
@@ -37,27 +38,45 @@ final class _CommanderAppState extends State<CommanderApp> {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xff415f91);
     return MaterialApp(
       title: 'Evaluetron Commander',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.system,
-      theme: _theme(Brightness.light, seed),
-      darkTheme: _theme(Brightness.dark, seed),
+      theme: buildCommanderTheme(Brightness.light),
+      darkTheme: buildCommanderTheme(Brightness.dark),
       home: CommanderShell(controller: _controller),
     );
   }
 }
 
-ThemeData _theme(Brightness brightness, Color seed) {
-  final colors = ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
+ThemeData buildCommanderTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final colors =
+      ColorScheme.fromSeed(
+        seedColor: CommanderBrand.accent,
+        brightness: brightness,
+        surface: dark ? const Color(0xFF0F131D) : CommanderBrand.lightSurface,
+      ).copyWith(
+        primary: dark ? CommanderBrand.accent : const Color(0xFF4058C7),
+        tertiary: dark ? CommanderBrand.signal : const Color(0xFF7A4B00),
+      );
   return ThemeData(
     useMaterial3: true,
     colorScheme: colors,
-    scaffoldBackgroundColor: colors.surface,
+    scaffoldBackgroundColor: dark
+        ? CommanderBrand.voidColor
+        : CommanderBrand.lightSurface,
+    visualDensity: VisualDensity.standard,
     textTheme: Typography.material2021(
       platform: TargetPlatform.android,
     ).black.apply(bodyColor: colors.onSurface, displayColor: colors.onSurface),
+    appBarTheme: AppBarTheme(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      shape: Border(bottom: BorderSide(color: colors.outlineVariant)),
+    ),
     cardTheme: CardThemeData(
       elevation: 0,
       margin: EdgeInsets.zero,
@@ -77,6 +96,33 @@ ThemeData _theme(Brightness brightness, Color seed) {
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 72,
+      backgroundColor: colors.surface,
+      indicatorColor: colors.primaryContainer,
+      labelTextStyle: WidgetStatePropertyAll(
+        TextStyle(
+          color: colors.onSurface,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: colors.surface,
+      indicatorColor: colors.primaryContainer,
+      selectedIconTheme: IconThemeData(color: colors.onPrimaryContainer),
+      selectedLabelTextStyle: TextStyle(
+        color: colors.primary,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     ),
   );

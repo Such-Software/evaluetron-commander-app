@@ -49,6 +49,8 @@ remaining release work.
 
 The optional managed-network design and upstream license audit are documented
 in [managed Nebula](docs/MANAGED_NEBULA.md).
+Visual identity and reproducible platform-asset generation are documented in
+[brand system](docs/BRAND.md).
 
 ## Development
 

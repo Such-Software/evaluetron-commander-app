@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../brand.dart';
 import '../domain/brain_client.dart';
 import '../network/managed_network.dart';
 import '../state/commander_controller.dart';
@@ -117,21 +118,10 @@ final class _CommanderShellState extends State<CommanderShell> {
               leading: Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 24),
                 child: extended
-                    ? const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _ProductMark(),
-                          SizedBox(width: 12),
-                          Text(
-                            'COMMANDER',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.5,
-                            ),
-                          ),
-                        ],
-                      )
-                    : const _ProductMark(),
+                    ? const EvaluetronLockup()
+                    : const EvaluetronMark(
+                        semanticLabel: 'Evaluetron Commander',
+                      ),
               ),
               trailing: Expanded(
                 child: Align(
@@ -182,11 +172,37 @@ final class _CommanderShellState extends State<CommanderShell> {
   PreferredSizeWidget _appBar(BuildContext context) {
     return AppBar(
       titleSpacing: 16,
+      toolbarHeight: 72,
       title: Row(
         children: [
-          const _ProductMark(size: 30),
+          const EvaluetronMark(size: 34, semanticLabel: 'Evaluetron Commander'),
           const SizedBox(width: 10),
-          Expanded(child: Text(_destinations[_index].label)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'evaluetron',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'COMMANDER · ${_destinations[_index].label.toUpperCase()}',
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
       actions: [
@@ -226,40 +242,6 @@ final class _CommanderShellState extends State<CommanderShell> {
 final class _NavigateIntent extends Intent {
   const _NavigateIntent(this.index);
   final int index;
-}
-
-final class _ProductMark extends StatelessWidget {
-  const _ProductMark({this.size = 36});
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'Evaluetron Commander',
-      child: ExcludeSemantics(
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Theme.of(context).colorScheme.primary,
-                Theme.of(context).colorScheme.tertiary,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(size * .3),
-          ),
-          child: Icon(
-            Icons.hub_outlined,
-            size: size * .58,
-            color: Theme.of(context).colorScheme.onPrimary,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 final class _DesktopHeader extends StatelessWidget {
@@ -340,7 +322,14 @@ final class _LoadingView extends StatelessWidget {
       body: Center(
         child: Semantics(
           label: 'Loading Commander',
-          child: const CircularProgressIndicator(),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              EvaluetronMark(size: 52),
+              SizedBox(height: 24),
+              CircularProgressIndicator(),
+            ],
+          ),
         ),
       ),
     );
@@ -368,7 +357,10 @@ final class _FailureView extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline, size: 48),
+                const EvaluetronMark(
+                  size: 52,
+                  semanticLabel: 'Evaluetron Commander',
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'Commander could not load',
@@ -1414,7 +1406,7 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
     return AlertDialog(
       title: const Row(
         children: [
-          _ProductMark(size: 34),
+          EvaluetronMark(size: 34),
           SizedBox(width: 12),
           Expanded(child: Text('Brain profile')),
         ],
