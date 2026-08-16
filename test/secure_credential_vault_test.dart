@@ -111,4 +111,58 @@ void main() {
       throwsUnsupportedError,
     );
   });
+
+  group('stranded device records', () {
+    StrandedDevice stranded({String id = 'dev-stranded-1'}) => StrandedDevice(
+      brainOrigin: Uri(scheme: 'https', host: 'brain.example.com'),
+      deviceId: id,
+      reason: 'Replaced by a new pairing.',
+    );
+
+    test('survives losing every credential, which is the point', () async {
+      // The reminder outlives the pairing it came from: the row is still live
+      // on the Brain, and nothing else on this device names it.
+      final vault = PlatformSecureCredentialVault(MemorySecureStorage());
+      await vault.write(credential);
+      await vault.recordStranded(stranded());
+      await vault.remove(credential.brainOrigin);
+
+      final kept = await vault.strandedDevices();
+      expect(kept, hasLength(1));
+      expect(kept.single.deviceId, 'dev-stranded-1');
+      expect(kept.single.brainOrigin.host, 'brain.example.com');
+    });
+
+    test('records one entry per device id and clears by id', () async {
+      final vault = PlatformSecureCredentialVault(MemorySecureStorage());
+      await vault.recordStranded(stranded());
+      await vault.recordStranded(stranded());
+      await vault.recordStranded(stranded(id: 'dev-stranded-2'));
+      expect(await vault.strandedDevices(), hasLength(2));
+
+      await vault.clearStranded('dev-stranded-1');
+      expect(
+        (await vault.strandedDevices()).map((e) => e.deviceId),
+        ['dev-stranded-2'],
+      );
+      await vault.clearStranded('dev-stranded-2');
+      expect(await vault.strandedDevices(), isEmpty);
+    });
+
+    test('a damaged record reads as empty rather than throwing', () async {
+      // This list exists to report a failure that already happened, so it must
+      // never become a second one.
+      final storage = MemorySecureStorage();
+      final vault = PlatformSecureCredentialVault(storage);
+      await vault.recordStranded(stranded());
+      storage.values['commander.stranded.v1'] = 'not json';
+
+      expect(await vault.strandedDevices(), isEmpty);
+      await vault.recordStranded(stranded(id: 'dev-stranded-3'));
+      expect(
+        (await vault.strandedDevices()).map((e) => e.deviceId),
+        ['dev-stranded-3'],
+      );
+    });
+  });
 }

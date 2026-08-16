@@ -2,6 +2,8 @@ import 'package:evaluetron_commander_app/src/app.dart';
 import 'package:evaluetron_commander_app/src/data/brain_tls_transport.dart';
 import 'package:evaluetron_commander_app/src/data/commander_brain_client.dart';
 import 'package:evaluetron_commander_app/src/domain/brain_client.dart';
+import 'package:evaluetron_commander_app/src/network/managed_network.dart';
+import 'package:evaluetron_commander_app/src/state/commander_controller.dart';
 import 'package:evaluetron_commander_app/src/security/local_auth_gate.dart';
 import 'package:evaluetron_commander_app/src/security/secure_credential_vault.dart';
 import 'package:flutter/material.dart';
@@ -508,4 +510,140 @@ void main() {
     expect(await setup.vault.read(_firstOrigin), isNotNull);
     expect(await setup.vault.read(_secondOrigin), isNotNull);
   });
+
+  group('what a failed cleanup leaves behind', () {
+    test('a refused re-pair revoke is written down, not dropped', () async {
+      // Re-pairing the same origin replaces the credential, stranding the row
+      // the old key belonged to. The revoke is best effort because re-pairing
+      // is the documented recovery path -- so when it fails, the device id has
+      // to survive somewhere, or only the Brain's console ever knows.
+      final setup = await _client();
+      await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+      expect(await setup.client.strandedDevices(), isEmpty);
+
+      setup.transport.respond = _brain(_secondDevice, revokeStatus: 401);
+      await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+
+      final stranded = await setup.client.strandedDevices();
+      expect(stranded, hasLength(1));
+      expect(stranded.single.deviceId, _firstDevice);
+      expect(stranded.single.origin, _firstOrigin);
+      // The pairing itself still succeeded: recovery must not be blocked.
+      expect((await setup.client.pairedBrains()).single.deviceId, _secondDevice);
+    });
+
+    test('a confirmed re-pair revoke leaves nothing behind', () async {
+      final setup = await _client();
+      await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+      setup.transport.respond = _brain(_secondDevice);
+      await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+
+      expect(await setup.client.strandedDevices(), isEmpty);
+    });
+
+    test('clearing a reminder removes only the one named', () async {
+      final setup = await _client();
+      await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+      setup.transport.respond = _brain(_secondDevice, revokeStatus: 401);
+      await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+
+      await setup.client.dismissStrandedDevice('some-other-device');
+      expect(await setup.client.strandedDevices(), hasLength(1));
+      await setup.client.dismissStrandedDevice(_firstDevice);
+      expect(await setup.client.strandedDevices(), isEmpty);
+    });
+  });
+
+  test('an unreadable record is listed so it can be removed', () async {
+    // It was skipped, which made it invisible AND unremovable: it cannot sign
+    // a revocation and nothing else on the device mentions it.
+    final setup = await _client();
+    await setup.client.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+    final storage = MemorySecureStorage();
+    final vault = PlatformSecureCredentialVault(storage);
+    await vault.write(
+      DeviceCredential(
+        brainOrigin: _firstOrigin,
+        deviceId: _firstDevice,
+        deviceLabel: 'Operator phone',
+        privateSeed: 'nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A',
+        publicKey: '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo',
+        scopes: const {'brain:read'},
+      ),
+    );
+    final key = storage.values.keys.firstWhere(
+      (k) => k != 'commander.origins.v1' && k != 'commander.active.v1',
+      orElse: () => '',
+    );
+    expect(key, isNotEmpty, reason: 'expected a credential entry to corrupt');
+    storage.values[key] = 'not json';
+
+    final client = CommanderBrainClient(
+      vault: vault,
+      localAuth: FakeLocalAuthGate(),
+      pins: MemoryBrainCertificatePinStore(),
+      transport: setup.transport,
+    );
+    final listed = await client.pairedBrains();
+    expect(listed, hasLength(1));
+    expect(listed.single.readable, isFalse);
+    expect(listed.single.origin, _firstOrigin);
+  });
+
+  group('retaining a pairing is deliberate but never silent', () {
+    test('pairing a second Brain says the first is still live', () async {
+      final setup = await _pairedTwice();
+      final controller = CommanderController(
+        setup.client,
+        const UnavailableManagedNetworkPlatform(),
+        setup.gate,
+      );
+      await controller.load();
+      // _pairedTwice paired through the client directly, so drive one more
+      // pairing through the controller to observe the notice it raises.
+      setup.transport.respond = _brain('11111111-1111-4111-8111-111111111111');
+      await controller.pair(
+        PairingRequest(
+          enrollmentUri: Uri.parse(
+            _enrollment(Uri.parse('https://brain-c.example.com')),
+          ),
+        ),
+      );
+
+      final notice = controller.takePairingNotice();
+      expect(notice, isNotNull);
+      expect(notice, contains('3 Brains'));
+      // Reading it clears it: it is a one-time statement, not a banner.
+      expect(controller.takePairingNotice(), isNull);
+    });
+
+    test('a first pairing raises no notice', () async {
+      final setup = await _client();
+      final controller = CommanderController(
+        setup.client,
+        const UnavailableManagedNetworkPlatform(),
+        setup.gate,
+      );
+      await controller.pair(
+        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+      );
+
+      expect(controller.takePairingNotice(), isNull);
+    });
+  });
 }
+

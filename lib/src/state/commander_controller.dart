@@ -50,6 +50,11 @@ final class CommanderController extends ChangeNotifier {
   List<BrainSetting> settings = const [];
   List<ActivityEvent> activity = const [];
   List<PairedBrain> pairedBrains = const [];
+
+  /// Device rows left active on a Brain after a cleanup this app could not
+  /// finish. Only the Brain's console can retire them, and only if it is told
+  /// which id, so this stays visible until the operator clears it.
+  List<StrandedCommanderDevice> strandedDevices = const [];
   ManagedNetworkCapability managedNetworkCapability =
       const ManagedNetworkCapability.unsupported();
   TunnelSnapshot tunnel = const TunnelSnapshot.unavailable();
@@ -79,6 +84,7 @@ final class CommanderController extends ChangeNotifier {
       ]);
       profile = loadedProfile;
       pairedBrains = await _client.pairedBrains();
+      strandedDevices = await _client.strandedDevices();
       overview = values[0] as BrainOverview;
       catalog = values[1] as List<ModelCapability>;
       jobs = values[2] as List<CommanderJob>;
@@ -181,7 +187,30 @@ final class CommanderController extends ChangeNotifier {
     await _stepUp(PrivilegedAction.pairBrain);
     final paired = await _client.pair(request);
     await load();
+    // Pairing an additional Brain deliberately does not offer to revoke the
+    // one already held: holding several is a supported workflow, and a mis-tap
+    // must not destroy access the operator never asked to give up. What it
+    // must not do is leave that a silent state -- each retained pairing is a
+    // live identity on another Brain. Say so once, here, rather than relying
+    // on the operator opening the profile dialog to discover it.
+    final others = pairedBrains.where((brain) => !brain.active).length;
+    pairingNotice = others == 0
+        ? null
+        : 'This device now commands ${others + 1} Brains. The other $others '
+              '${others == 1 ? 'is a live identity' : 'are live identities'} '
+              'until removed in Brain profile.';
+    notifyListeners();
     return paired;
+  }
+
+  /// Set after a pairing that left other pairings in place. Cleared once read
+  /// by the surface that shows it.
+  String? pairingNotice;
+
+  String? takePairingNotice() {
+    final notice = pairingNotice;
+    pairingNotice = null;
+    return notice;
   }
 
   /// Commands a different Brain this device is already paired to.
@@ -199,6 +228,14 @@ final class CommanderController extends ChangeNotifier {
   /// Reports why nothing happened rather than throwing, so the caller can show
   /// it where the operator asked instead of dropping the whole shell into its
   /// failure state over a cancelled prompt or an unreachable Brain.
+  /// Clears the local reminder for [deviceId]. Revokes nothing: the operator
+  /// is asserting they have already retired it from the Brain's console.
+  Future<void> dismissStrandedDevice(String deviceId) async {
+    await _client.dismissStrandedDevice(deviceId);
+    strandedDevices = await _client.strandedDevices();
+    notifyListeners();
+  }
+
   Future<PairingRemovalResult> forgetPairing({bool localOnly = false}) =>
       _removePairing(() => _client.forgetPairing(localOnly: localOnly));
 

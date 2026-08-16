@@ -179,7 +179,23 @@ final class PairedBrain {
     required this.deviceId,
     required this.deviceLabel,
     required this.active,
+    this.readable = true,
   });
+
+  /// A stored record that no longer parses.
+  ///
+  /// It was previously skipped, which made it invisible and unremovable: it
+  /// cannot be signed with, switched to, or revoked, and nothing else on this
+  /// device mentions it. Listing it as unusable is what gives the operator a
+  /// way to delete it; hiding it only made the store impossible to clean.
+  factory PairedBrain.unreadable({required Uri origin, required bool active}) =>
+      PairedBrain(
+        origin: origin,
+        deviceId: '',
+        deviceLabel: '',
+        active: active,
+        readable: false,
+      );
 
   final Uri origin;
   final String deviceId;
@@ -187,6 +203,26 @@ final class PairedBrain {
 
   /// Whether requests are currently signed with this credential.
   final bool active;
+
+  /// Whether the stored record could be read at all. When false every other
+  /// field is empty and the only action available is local removal.
+  final bool readable;
+}
+
+/// A device row this app created on a Brain and could not retire.
+///
+/// Surfaced until the operator clears it, because Commander cannot revoke
+/// another device — only the Brain's console can, and only if it knows the id.
+final class StrandedCommanderDevice {
+  const StrandedCommanderDevice({
+    required this.origin,
+    required this.deviceId,
+    required this.reason,
+  });
+
+  final Uri origin;
+  final String deviceId;
+  final String reason;
 }
 
 abstract interface class BrainClient {
@@ -207,6 +243,13 @@ abstract interface class BrainClient {
   /// Pairing a second Brain keeps the first credential, so this is how the
   /// operator sees what this device can still command.
   Future<List<PairedBrain>> pairedBrains();
+
+  /// Device rows this app left active on a Brain after a failed cleanup.
+  Future<List<StrandedCommanderDevice>> strandedDevices();
+
+  /// Forgets a stranded record once the operator has retired it from the
+  /// console. This only clears the local reminder; it revokes nothing.
+  Future<void> dismissStrandedDevice(String deviceId);
 
   /// Signs every later request with the credential stored for [origin].
   Future<BrainProfile> selectPairedBrain(Uri origin);

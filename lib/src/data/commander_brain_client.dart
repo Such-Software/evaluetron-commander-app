@@ -542,10 +542,13 @@ final class CommanderBrainClient implements BrainClient {
       try {
         credential = await _vault.read(origin);
       } on FormatException {
-        // An unreadable record cannot be signed with, switched to, or
-        // revoked from here. Hiding it keeps the list honest about what this
-        // device can actually command; the Brain's console still shows the
-        // device itself.
+        // An unreadable record cannot be signed with, switched to, or revoked
+        // from here — but hiding it made it unremovable too, since nothing
+        // else on this device mentions it. List it as unusable so the operator
+        // can at least delete it; the Brain's console still shows the row.
+        brains.add(
+          PairedBrain.unreadable(origin: origin, active: origin == active),
+        );
         continue;
       }
       if (credential == null) continue;
@@ -586,6 +589,25 @@ final class CommanderBrainClient implements BrainClient {
     _credentialFuture = Future.value(credential);
     return _profileFor(credential);
   }
+
+  @override
+  Future<List<StrandedCommanderDevice>> strandedDevices() async {
+    if (await _vault.protection() != VaultProtection.operatingSystem) {
+      return const [];
+    }
+    return [
+      for (final entry in await _vault.strandedDevices())
+        StrandedCommanderDevice(
+          origin: entry.brainOrigin,
+          deviceId: entry.deviceId,
+          reason: entry.reason,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> dismissStrandedDevice(String deviceId) =>
+      _vault.clearStranded(deviceId);
 
   @override
   Future<PairingRemoval> removePairedBrain(
@@ -838,15 +860,25 @@ final class CommanderBrainClient implements BrainClient {
     try {
       profile = await _profileFor(credential);
     } on Object catch (error) {
+      if (await _tryRevoke(credential)) {
+        throw CommanderTransportException(
+          'Pairing could not be completed: $error The device Commander had '
+          'just created was revoked again, so nothing was left active '
+          'on the Brain. Create a new enrollment and pair again.',
+        );
+      }
+      // The message below is shown once and then dismissed, and the device id
+      // in it is the only way to retire the row from the console. Write it
+      // down before raising, or a lost dialog loses the row for good.
+      await _recordStranded(
+        credential,
+        'Pairing did not finish after the Brain created this device.',
+      );
       throw CommanderTransportException(
-        await _tryRevoke(credential)
-            ? 'Pairing could not be completed: $error The device Commander had '
-                  'just created was revoked again, so nothing was left active '
-                  'on the Brain. Create a new enrollment and pair again.'
-            : 'Pairing could not be completed: $error Commander could not '
-                  'revoke the device it had just created: revoke device '
-                  '${credential.deviceId} from the operator console. The '
-                  'enrollment is spent, so pairing again needs a new one.',
+        'Pairing could not be completed: $error Commander could not '
+        'revoke the device it had just created: revoke device '
+        '${credential.deviceId} from the operator console. The '
+        'enrollment is spent, so pairing again needs a new one.',
       );
     }
     // Pairing an origin that is already paired replaces the credential this
@@ -856,7 +888,15 @@ final class CommanderBrainClient implements BrainClient {
     // Brain that will not accept the old credential — the certificate changed,
     // the console already revoked it — must not block the recovery.
     if (await _replacedCredential(enrollment.brainOrigin) case final old?) {
-      await _tryRevoke(old);
+      if (!await _tryRevoke(old)) {
+        // Recovery must not be blocked, but the row it strands must not vanish
+        // silently either: nothing else on this device will ever mention it
+        // again, and only the console can retire it.
+        await _recordStranded(
+          old,
+          'Replaced by a new pairing that this Brain would not let it retire.',
+        );
+      }
     }
     await _vault.write(credential);
     _catalog = const [];
@@ -871,6 +911,24 @@ final class CommanderBrainClient implements BrainClient {
       return await _vault.read(origin);
     } on Object {
       return null;
+    }
+  }
+
+  /// Writes down a device row this app created and could not retire.
+  ///
+  /// Never throws: it runs on paths that are already handling a failure, and a
+  /// storage problem here must not replace the error the operator needs to see.
+  Future<void> _recordStranded(DeviceCredential credential, String reason) async {
+    try {
+      await _vault.recordStranded(
+        StrandedDevice(
+          brainOrigin: credential.brainOrigin,
+          deviceId: credential.deviceId,
+          reason: reason,
+        ),
+      );
+    } on Object {
+      // Nothing useful to do; the caller's own error still names the device id.
     }
   }
 

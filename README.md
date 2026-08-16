@@ -59,6 +59,32 @@ That revocation cannot be allowed to fail the pairing, because pairing again is
 the documented recovery path after a Brain certificate change — the one case
 where the old credential can no longer be used to talk to that Brain at all.
 
+### What a failed cleanup leaves behind
+
+Every cleanup above is best effort, and best effort means it sometimes fails.
+Commander cannot revoke another device — there is no `commander:admin` scope,
+so only the Brain's own console can retire a row, and only if it is told which
+id. Reporting that id once in an error the operator dismisses loses it for
+good.
+
+So a failed cleanup is written down. The device id, its Brain, and why the
+cleanup could not finish are stored beside the credentials and listed under
+**Left on a Brain** in the Brain profile dialog until the operator clears the
+entry. Clearing is local only and says so: Commander cannot check whether the
+row was actually retired, so it does not pretend to.
+
+A stored record that no longer parses is listed too, marked unusable. It cannot
+be signed with, switched to, or revoked, and it used to be hidden — which also
+made it unremovable, because nothing else on the device mentioned it. It now
+offers local removal only, with the same warning that a device may remain live
+on that Brain.
+
+Pairing an *additional* Brain still does not offer to revoke the one already
+held. Holding several is a supported workflow, and a mis-tap during pairing
+must not destroy access the operator never asked to give up. But keeping it is
+a live identity on another Brain, so pairing now reports how many Brains this
+device commands rather than leaving that a silent state.
+
 ### Local authentication gate
 
 Commander holds operator authority over a whole fleet, so the operating-system

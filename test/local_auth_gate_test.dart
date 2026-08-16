@@ -351,6 +351,12 @@ class _RecordingBrainClient implements BrainClient {
   Future<List<PairedBrain>> pairedBrains() async => const [];
 
   @override
+  Future<List<StrandedCommanderDevice>> strandedDevices() async => const [];
+
+  @override
+  Future<void> dismissStrandedDevice(String deviceId) async {}
+
+  @override
   Future<PairingRemoval> removePairedBrain(
     Uri origin, {
     bool localOnly = false,

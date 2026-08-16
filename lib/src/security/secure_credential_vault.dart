@@ -27,6 +27,45 @@ final class DeviceCredential {
   String toString() => 'DeviceCredential(<redacted>)';
 }
 
+/// A device row this app created on a Brain and could not retire.
+///
+/// Commander can only revoke itself — there is no `commander:admin` scope, so a
+/// second device cannot revoke a first. When an automatic cleanup fails, the
+/// only remaining route is the Brain's own console, and that needs the device
+/// id. Losing it means an active device row nobody holds a key for, invisible
+/// from here. So the id is written down rather than reported once and dropped.
+final class StrandedDevice {
+  const StrandedDevice({
+    required this.brainOrigin,
+    required this.deviceId,
+    required this.reason,
+  });
+
+  final Uri brainOrigin;
+  final String deviceId;
+
+  /// Why the cleanup could not finish, phrased for the operator.
+  final String reason;
+
+  Map<String, Object?> toJson() => {
+    'brainOrigin': brainOrigin.toString(),
+    'deviceId': deviceId,
+    'reason': reason,
+  };
+
+  static StrandedDevice? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final origin = Uri.tryParse('${value['brainOrigin']}');
+    final deviceId = value['deviceId'];
+    if (origin == null || deviceId is! String || deviceId.isEmpty) return null;
+    return StrandedDevice(
+      brainOrigin: origin,
+      deviceId: deviceId,
+      reason: value['reason'] is String ? value['reason'] as String : '',
+    );
+  }
+}
+
 /// How well the platform protects credential material at rest.
 ///
 /// There is deliberately no `userPresence` value. This vault stores the
@@ -59,6 +98,16 @@ abstract interface class SecureCredentialVault {
 
   /// Makes the credential stored for [brainOrigin] the active one.
   Future<void> activate(Uri brainOrigin);
+
+  /// Device rows left active on a Brain because an automatic revoke failed.
+  Future<List<StrandedDevice>> strandedDevices();
+
+  /// Records [device] as needing revocation from its Brain's console. Replaces
+  /// any earlier record for the same device id.
+  Future<void> recordStranded(StrandedDevice device);
+
+  /// Forgets a stranded record once the operator has dealt with it.
+  Future<void> clearStranded(String deviceId);
 }
 
 final class UnavailableCredentialVault implements SecureCredentialVault {
@@ -93,6 +142,15 @@ final class UnavailableCredentialVault implements SecureCredentialVault {
 
   @override
   Future<void> activate(Uri brainOrigin) async => _unsupported();
+
+  @override
+  Future<List<StrandedDevice>> strandedDevices() async => const [];
+
+  @override
+  Future<void> recordStranded(StrandedDevice device) async => _unsupported();
+
+  @override
+  Future<void> clearStranded(String deviceId) async => _unsupported();
 }
 
 abstract interface class SecureStorageAdapter {
@@ -132,6 +190,7 @@ final class PlatformSecureCredentialVault implements SecureCredentialVault {
 
   static const _activeKey = 'commander.active-origin.v1';
   static const _originsKey = 'commander.origins.v1';
+  static const _strandedKey = 'commander.stranded.v1';
   static final _sha256 = Sha256();
   final SecureStorageAdapter _storage;
 
@@ -270,6 +329,55 @@ final class PlatformSecureCredentialVault implements SecureCredentialVault {
       await _storage.delete(_activeKey);
     } else {
       await _storage.write(_activeKey, remaining.last.toString());
+    }
+  }
+
+  @override
+  Future<List<StrandedDevice>> strandedDevices() async {
+    _requireNativeSecureStore();
+    return List.unmodifiable(await _readStranded());
+  }
+
+  @override
+  Future<void> recordStranded(StrandedDevice device) async {
+    _requireNativeSecureStore();
+    final kept = (await _readStranded())
+        .where((entry) => entry.deviceId != device.deviceId)
+        .toList()
+      ..add(device);
+    await _storage.write(
+      _strandedKey,
+      jsonEncode([for (final entry in kept) entry.toJson()]),
+    );
+  }
+
+  @override
+  Future<void> clearStranded(String deviceId) async {
+    _requireNativeSecureStore();
+    final kept = (await _readStranded())
+        .where((entry) => entry.deviceId != deviceId)
+        .toList(growable: false);
+    if (kept.isEmpty) {
+      await _storage.delete(_strandedKey);
+      return;
+    }
+    await _storage.write(
+      _strandedKey,
+      jsonEncode([for (final entry in kept) entry.toJson()]),
+    );
+  }
+
+  /// Never throws: this list exists to tell the operator about a cleanup that
+  /// already failed, so a damaged record must not become a second failure.
+  Future<List<StrandedDevice>> _readStranded() async {
+    final value = await _storage.read(_strandedKey);
+    if (value == null) return const [];
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is! List) return const [];
+      return [for (final entry in decoded) ?StrandedDevice.fromJson(entry)];
+    } on FormatException {
+      return const [];
     }
   }
 

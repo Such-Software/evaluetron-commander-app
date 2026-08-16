@@ -1532,6 +1532,30 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
                   ],
                 ),
               ),
+              if (widget.controller.strandedDevices.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Text(
+                  'Left on a Brain',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Commander created these devices but could not retire them. '
+                  'It cannot revoke them now — only the Brain\'s own console '
+                  'can, and only if it is given the id. Clear an entry once '
+                  'you have done that.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                for (final stranded in widget.controller.strandedDevices)
+                  _StrandedDeviceRow(
+                    device: stranded,
+                    busy: _busy,
+                    onClear: () => _clearStranded(stranded),
+                  ),
+              ],
               if (widget.controller.pairedBrains.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Text(
@@ -1652,7 +1676,15 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
     try {
       await widget.controller.pair(PairingRequest(enrollmentUri: enrollment));
       if (!mounted) return;
+      final notice = widget.controller.takePairingNotice();
       Navigator.pop(context);
+      // Retaining the previous pairing is the deliberate choice, but it leaves
+      // a live identity on another Brain, so it must not be a silent one.
+      if (notice != null && context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(notice)));
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _message = '$error');
@@ -1711,18 +1743,65 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
   }
 
   /// Revokes one pairing on its own Brain and deletes it from this device.
+  /// Clears the local reminder only. The operator is asserting they have
+  /// already retired the device from the Brain's console; nothing here can
+  /// verify that, so the confirmation says so plainly.
+  Future<void> _clearStranded(StrandedCommanderDevice device) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear this reminder?'),
+        content: Text(
+          'Commander cannot revoke ${device.deviceId} and cannot check whether '
+          'you have. Clearing removes the reminder from this device only. If '
+          'the device is still active on ${device.origin.host}, it stays '
+          'active.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await widget.controller.dismissStrandedDevice(device.deviceId);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<PairingRemovalOutcome> _remove(PairedBrain brain) async {
     setState(() {
       _busy = true;
       _message = null;
       _notice = null;
     });
-    final result = await removePairingWithOfflineFallback(
-      context: context,
-      brain: brain,
-      removal: ({bool localOnly = false}) =>
-          widget.controller.removePairing(brain.origin, localOnly: localOnly),
-    );
+    // An unreadable record cannot sign a revocation, so attempting the server
+    // path first would only fail. Go straight to local removal; the notice
+    // below still tells the operator the Brain may hold a live row.
+    final result = brain.readable
+        ? await removePairingWithOfflineFallback(
+            context: context,
+            brain: brain,
+            removal: ({bool localOnly = false}) => widget.controller
+                .removePairing(brain.origin, localOnly: localOnly),
+          )
+        : await removeUnreadablePairing(
+            context: context,
+            brain: brain,
+            removal: () => widget.controller.removePairing(
+              brain.origin,
+              localOnly: true,
+            ),
+          );
     if (!mounted) return result.outcome;
     setState(() {
       _busy = false;
@@ -1736,9 +1815,13 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
       _notice = switch (result.outcome) {
         PairingRemovalOutcome.revoked =>
           '${brain.origin.host} was revoked and removed from this device.',
-        PairingRemovalOutcome.consoleRevocationRequired =>
-          'Removed from this device. Device ${brain.deviceId} is still active '
-              'on ${brain.origin.host} — revoke it from that Brain\'s console.',
+        PairingRemovalOutcome.consoleRevocationRequired => brain.readable
+            ? 'Removed from this device. Device ${brain.deviceId} is still '
+                  'active on ${brain.origin.host} — revoke it from that '
+                  'Brain\'s console.'
+            : 'Removed from this device. This record could not be read, so any '
+                  'device it held on ${brain.origin.host} must be found and '
+                  'revoked from that Brain\'s console.',
         PairingRemovalOutcome.brainUnreachable ||
         PairingRemovalOutcome.refused ||
         PairingRemovalOutcome.failed => null,
@@ -1763,6 +1846,32 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
 /// offline path exists so that a Brain which is down, unreachable, or refusing
 /// its own certificate cannot leave the operator with a device they are unable
 /// to clear.
+/// Removes a stored record that no longer parses.
+///
+/// There is no server attempt to make: the record cannot sign a revocation, so
+/// trying would only produce a failure the operator can do nothing with. The
+/// confirmation is still required, because deleting it gives up the last local
+/// trace of whatever device it held.
+Future<PairingRemovalResult> removeUnreadablePairing({
+  required BuildContext context,
+  required PairedBrain brain,
+  required Future<PairingRemovalResult> Function() removal,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => _LocalRemovalDialog(
+      brain: brain,
+      reason:
+          'This record cannot be read, so Commander cannot revoke it. Removing '
+          'it clears this device only.',
+    ),
+  );
+  if (confirmed != true) {
+    return (outcome: PairingRemovalOutcome.refused, message: null);
+  }
+  return removal();
+}
+
 Future<PairingRemovalResult> removePairingWithOfflineFallback({
   required BuildContext context,
   required PairedBrain? brain,
@@ -1853,18 +1962,30 @@ final class _PairedBrainRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(
-        brain.active ? Icons.verified_user_outlined : Icons.dns_outlined,
+        !brain.readable
+            ? Icons.report_gmailerrorred_outlined
+            : brain.active
+            ? Icons.verified_user_outlined
+            : Icons.dns_outlined,
       ),
       title: Text(brain.origin.host),
       subtitle: Text(
-        '${brain.deviceLabel} · ${brain.deviceId}',
-        maxLines: 2,
+        brain.readable
+            ? '${brain.deviceLabel} · ${brain.deviceId}'
+            : 'Stored record cannot be read. It cannot command this Brain or '
+                  'revoke itself; removing it here only clears this device.',
+        maxLines: 3,
         overflow: TextOverflow.ellipsis,
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (brain.active)
+          if (!brain.readable)
+            const Chip(
+              label: Text('Unusable'),
+              visualDensity: VisualDensity.compact,
+            )
+          else if (brain.active)
             const Chip(
               label: Text('Active'),
               visualDensity: VisualDensity.compact,
@@ -2119,6 +2240,37 @@ final class _EnrollmentScannerDialogState
           child: const Text('Cancel'),
         ),
       ],
+    );
+  }
+}
+
+/// One device row this app left active on a Brain.
+final class _StrandedDeviceRow extends StatelessWidget {
+  const _StrandedDeviceRow({
+    required this.device,
+    required this.busy,
+    required this.onClear,
+  });
+
+  final StrandedCommanderDevice device;
+  final bool busy;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      leading: Icon(Icons.link_off_outlined, color: scheme.error),
+      title: Text(device.deviceId),
+      subtitle: Text(
+        '${device.origin.host} · ${device.reason}',
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: TextButton(
+        onPressed: busy ? null : onClear,
+        child: const Text('Clear'),
+      ),
     );
   }
 }
