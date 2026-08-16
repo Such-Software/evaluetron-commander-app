@@ -440,6 +440,49 @@ void main() {
     );
   });
 
+  testWidgets('what is left on the Brain outlives the dialog that says it', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final setup = await _client();
+    await setup.client.pair(
+      PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+    );
+
+    await tester.pumpWidget(
+      CommanderApp(client: setup.client, localAuth: setup.gate),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Open Brain profile'));
+    await tester.pumpAndSettle();
+
+    final reachable = _brain(_firstDevice);
+    setup.transport.respond = (method, path, body) =>
+        path == '/api/commander/v1/revoke'
+        ? throw const BrainNetworkException('Connection refused')
+        : reachable(method, path, body);
+
+    await tester.tap(find.text('Revoke and remove'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from this device only'));
+    await tester.pumpAndSettle();
+
+    expect(await setup.vault.origins(), isEmpty);
+    // Removing the last pairing normally closes the dialog. Here it must not,
+    // because the operator still has to revoke the device in the console.
+    expect(
+      find.widgetWithText(TextField, 'Commander enrollment URI'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('revoke it from that Brain\'s console'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('a refused presence proof leaves both pairings alone', (
     tester,
   ) async {

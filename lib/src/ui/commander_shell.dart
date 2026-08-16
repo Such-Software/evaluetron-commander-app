@@ -1684,11 +1684,13 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
           deviceLabel: profile.name,
           active: true,
         );
-    await _remove(active);
+    final outcome = await _remove(active);
     if (!mounted) return;
-    // Another pairing may have taken over, so this closes only when there is
-    // no paired Brain left to look at.
-    if (widget.controller.profile?.mode != ConnectionMode.paired) {
+    // Closes only when the removal was clean and no pairing is left to look
+    // at. "Still active on the Brain" is the one message that must not
+    // disappear with the dialog that raised it.
+    if (outcome == PairingRemovalOutcome.revoked &&
+        widget.controller.profile?.mode != ConnectionMode.paired) {
       Navigator.pop(context);
     }
   }
@@ -1709,7 +1711,7 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
   }
 
   /// Revokes one pairing on its own Brain and deletes it from this device.
-  Future<void> _remove(PairedBrain brain) async {
+  Future<PairingRemovalOutcome> _remove(PairedBrain brain) async {
     setState(() {
       _busy = true;
       _message = null;
@@ -1721,7 +1723,7 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
       removal: ({bool localOnly = false}) =>
           widget.controller.removePairing(brain.origin, localOnly: localOnly),
     );
-    if (!mounted) return;
+    if (!mounted) return result.outcome;
     setState(() {
       _busy = false;
       _message = switch (result.outcome) {
@@ -1742,6 +1744,7 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
         PairingRemovalOutcome.failed => null,
       };
     });
+    return result.outcome;
   }
 
   Future<void> _showManagedNetwork() {
