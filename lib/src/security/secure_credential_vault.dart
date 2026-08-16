@@ -341,10 +341,11 @@ final class PlatformSecureCredentialVault implements SecureCredentialVault {
   @override
   Future<void> recordStranded(StrandedDevice device) async {
     _requireNativeSecureStore();
-    final kept = (await _readStranded())
-        .where((entry) => entry.deviceId != device.deviceId)
-        .toList()
-      ..add(device);
+    final kept =
+        (await _readStranded())
+            .where((entry) => entry.deviceId != device.deviceId)
+            .toList()
+          ..add(device);
     await _storage.write(
       _strandedKey,
       jsonEncode([for (final entry in kept) entry.toJson()]),

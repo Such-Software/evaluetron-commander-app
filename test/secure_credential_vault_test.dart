@@ -141,10 +141,9 @@ void main() {
       expect(await vault.strandedDevices(), hasLength(2));
 
       await vault.clearStranded('dev-stranded-1');
-      expect(
-        (await vault.strandedDevices()).map((e) => e.deviceId),
-        ['dev-stranded-2'],
-      );
+      expect((await vault.strandedDevices()).map((e) => e.deviceId), [
+        'dev-stranded-2',
+      ]);
       await vault.clearStranded('dev-stranded-2');
       expect(await vault.strandedDevices(), isEmpty);
     });
@@ -159,10 +158,9 @@ void main() {
 
       expect(await vault.strandedDevices(), isEmpty);
       await vault.recordStranded(stranded(id: 'dev-stranded-3'));
-      expect(
-        (await vault.strandedDevices()).map((e) => e.deviceId),
-        ['dev-stranded-3'],
-      );
+      expect((await vault.strandedDevices()).map((e) => e.deviceId), [
+        'dev-stranded-3',
+      ]);
     });
   });
 }

@@ -89,10 +89,7 @@ void main() {
 
         expect(gate.requested, [PrivilegedAction.submitJob]);
         expect(client.submitted, hasLength(1));
-        expect(
-          localAuthPermits(LocalAuthOutcome.unsupportedPlatform),
-          isTrue,
-        );
+        expect(localAuthPermits(LocalAuthOutcome.unsupportedPlatform), isTrue);
         expect(localAuthPermits(LocalAuthOutcome.notEnrolled), isFalse);
         expect(localAuthPermits(LocalAuthOutcome.rejected), isFalse);
       },

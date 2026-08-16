@@ -37,6 +37,7 @@ final class _CommanderLockGateState extends State<CommanderLockGate>
     with WidgetsBindingObserver {
   bool _locked = false;
   bool _authenticating = false;
+
   /// True where the platform ships no local authentication at all, so the
   /// session is protected only by the desktop login. Surfaced rather than
   /// silently assumed, because the operator cannot fix it by enrolling.

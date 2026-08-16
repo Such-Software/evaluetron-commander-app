@@ -12,10 +12,8 @@ final class FakeLocalAuthGate implements LocalAuthGate {
 
   /// A device that could prove presence but has no screen lock enrolled.
   /// Fails closed: the operator can fix this.
-  factory FakeLocalAuthGate.notEnrolled() => FakeLocalAuthGate(
-    outcome: LocalAuthOutcome.notEnrolled,
-    enrolled: false,
-  );
+  factory FakeLocalAuthGate.notEnrolled() =>
+      FakeLocalAuthGate(outcome: LocalAuthOutcome.notEnrolled, enrolled: false);
 
   /// A platform with no local authentication implementation at all, such as
   /// Linux desktop. Permits the action and reports the session unprotected.

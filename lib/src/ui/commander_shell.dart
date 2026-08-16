@@ -1797,10 +1797,8 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
         : await removeUnreadablePairing(
             context: context,
             brain: brain,
-            removal: () => widget.controller.removePairing(
-              brain.origin,
-              localOnly: true,
-            ),
+            removal: () =>
+                widget.controller.removePairing(brain.origin, localOnly: true),
           );
     if (!mounted) return result.outcome;
     setState(() {
@@ -1815,13 +1813,14 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
       _notice = switch (result.outcome) {
         PairingRemovalOutcome.revoked =>
           '${brain.origin.host} was revoked and removed from this device.',
-        PairingRemovalOutcome.consoleRevocationRequired => brain.readable
-            ? 'Removed from this device. Device ${brain.deviceId} is still '
-                  'active on ${brain.origin.host} — revoke it from that '
-                  'Brain\'s console.'
-            : 'Removed from this device. This record could not be read, so any '
-                  'device it held on ${brain.origin.host} must be found and '
-                  'revoked from that Brain\'s console.',
+        PairingRemovalOutcome.consoleRevocationRequired =>
+          brain.readable
+              ? 'Removed from this device. Device ${brain.deviceId} is still '
+                    'active on ${brain.origin.host} — revoke it from that '
+                    'Brain\'s console.'
+              : 'Removed from this device. This record could not be read, so any '
+                    'device it held on ${brain.origin.host} must be found and '
+                    'revoked from that Brain\'s console.',
         PairingRemovalOutcome.brainUnreachable ||
         PairingRemovalOutcome.refused ||
         PairingRemovalOutcome.failed => null,

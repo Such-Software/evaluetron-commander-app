@@ -533,7 +533,10 @@ void main() {
       expect(stranded.single.deviceId, _firstDevice);
       expect(stranded.single.origin, _firstOrigin);
       // The pairing itself still succeeded: recovery must not be blocked.
-      expect((await setup.client.pairedBrains()).single.deviceId, _secondDevice);
+      expect(
+        (await setup.client.pairedBrains()).single.deviceId,
+        _secondDevice,
+      );
     });
 
     test('a confirmed re-pair revoke leaves nothing behind', () async {
@@ -571,8 +574,8 @@ void main() {
     // a revocation and nothing else on the device mentions it.
     final setup = await _client();
     await setup.client.pair(
-        PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
-      );
+      PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+    );
     final storage = MemorySecureStorage();
     final vault = PlatformSecureCredentialVault(storage);
     await vault.write(
@@ -646,4 +649,3 @@ void main() {
     });
   });
 }
-

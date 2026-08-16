@@ -136,7 +136,9 @@ final class PlatformLocalAuthGate implements LocalAuthGate {
 
   @override
   Future<LocalAuthOutcome> authenticate(PrivilegedAction action) async {
-    if (!await _platformSupported()) return LocalAuthOutcome.unsupportedPlatform;
+    if (!await _platformSupported()) {
+      return LocalAuthOutcome.unsupportedPlatform;
+    }
     if (!await isEnrolled()) return LocalAuthOutcome.notEnrolled;
     try {
       final ok = await _auth.authenticate(

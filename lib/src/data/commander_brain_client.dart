@@ -918,7 +918,10 @@ final class CommanderBrainClient implements BrainClient {
   ///
   /// Never throws: it runs on paths that are already handling a failure, and a
   /// storage problem here must not replace the error the operator needs to see.
-  Future<void> _recordStranded(DeviceCredential credential, String reason) async {
+  Future<void> _recordStranded(
+    DeviceCredential credential,
+    String reason,
+  ) async {
     try {
       await _vault.recordStranded(
         StrandedDevice(
