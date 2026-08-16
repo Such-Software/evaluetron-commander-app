@@ -255,8 +255,12 @@ void main() {
         issuer: 'CN=Corp MDM Root',
       );
 
-      // Revocation cannot reach the Brain, but must still complete locally.
-      await setup.client.forgetPairing();
+      // Revocation cannot reach the Brain, but must still complete locally --
+      // and say plainly that the device outlives the local credential.
+      expect(
+        await setup.client.forgetPairing(),
+        PairingRemoval.consoleRevocationRequired,
+      );
 
       expect(await setup.pins.read(_origin), isNull);
       expect((await setup.client.getProfile()).mode, ConnectionMode.fixture);

@@ -33,16 +33,20 @@ final class FixtureBrainClient implements BrainClient {
     return value;
   }
 
-  @override
-  Future<void> forgetPairing() async {}
-
   /// Fixture mode holds no credential, so there is nothing to list, switch
-  /// between, or remove.
+  /// between, or remove, and nothing is left behind on any Brain.
+  @override
+  Future<PairingRemoval> forgetPairing({bool localOnly = false}) async =>
+      PairingRemoval.revoked;
+
   @override
   Future<List<PairedBrain>> pairedBrains() async => const [];
 
   @override
-  Future<void> removePairedBrain(Uri origin) async {}
+  Future<PairingRemoval> removePairedBrain(
+    Uri origin, {
+    bool localOnly = false,
+  }) async => PairingRemoval.revoked;
 
   @override
   Future<BrainProfile> selectPairedBrain(Uri origin) {

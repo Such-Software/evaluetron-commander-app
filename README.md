@@ -36,6 +36,16 @@ valid on its own Brain, so it is listed in the Brain profile dialog with the
 device id it carries, and can be switched to or removed there. Removing a
 pairing revokes it on that Brain first, then deletes the local seed.
 
+A removal always asks the Brain to revoke the device first, and never skips
+that because it might fail. When the Brain answers, the credential is deleted
+either way: a `401` means the console already revoked it, and a changed
+certificate means Commander will not talk to that Brain again. When the Brain
+cannot be reached at all, nothing is removed and the operator is offered a
+clearly labelled local-only removal instead, which states that the device stays
+active on the Brain and names the device id to revoke from the console. That
+escape hatch is reachable from the profile dialog and from the failure screen,
+so a Brain that is down cannot trap a device in a pairing it cannot clear.
+
 Pairing an origin that is *already* paired is different: the new key replaces
 the old one, which would strand the device row the old key belonged to, so the
 replaced identity is revoked on a best-effort basis before it is overwritten.

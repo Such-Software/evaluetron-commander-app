@@ -137,6 +137,37 @@ final class PairingRequest {
   final Uri enrollmentUri;
 }
 
+/// What removing a pairing left behind on the Brain.
+enum PairingRemoval {
+  /// Nothing. The Brain revoked the device, or had already revoked it.
+  revoked,
+
+  /// The device is still active on the Brain, and can now only be revoked
+  /// there: this device no longer holds the key to revoke itself with.
+  consoleRevocationRequired,
+}
+
+/// The Brain could not be reached to revoke a device, so nothing was removed.
+///
+/// Distinct from a Brain that answered, because the caller's remedy is
+/// different: retry later, or delete the local credential knowingly and revoke
+/// [deviceId] from the operator console instead. The credential is deliberately
+/// still on the device when this is thrown.
+final class BrainUnreachableException implements Exception {
+  const BrainUnreachableException({
+    required this.origin,
+    required this.deviceId,
+    required this.message,
+  });
+
+  final Uri origin;
+  final String deviceId;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// One Brain this Commander holds a device credential for.
 ///
 /// Deliberately carries no key material. The private seed stays in the vault
@@ -169,7 +200,7 @@ abstract interface class BrainClient {
   Future<CommanderJob> submitJob(JobRequest request);
 
   /// Revokes and removes the pairing currently in use.
-  Future<void> forgetPairing();
+  Future<PairingRemoval> forgetPairing({bool localOnly = false});
 
   /// Every Brain a credential is held for, the active one first.
   ///
@@ -181,7 +212,14 @@ abstract interface class BrainClient {
   Future<BrainProfile> selectPairedBrain(Uri origin);
 
   /// Revokes this device on [origin], then deletes the local credential.
-  Future<void> removePairedBrain(Uri origin);
+  ///
+  /// Throws [BrainUnreachableException] and changes nothing when the Brain
+  /// could not be asked to revoke it. [localOnly] is the escape hatch for that
+  /// case: it deletes the local credential without contacting the Brain, which
+  /// leaves the device active there. Never take it without the operator's
+  /// explicit consent — a revocation that could have succeeded must not be
+  /// skipped silently.
+  Future<PairingRemoval> removePairedBrain(Uri origin, {bool localOnly = false});
 
   /// Exchanges a one-time enrollment for a locally generated, revocable
   /// public-key device identity.

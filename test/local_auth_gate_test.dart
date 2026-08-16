@@ -124,12 +124,13 @@ void main() {
         final gate = FakeLocalAuthGate.rejecting();
         final controller = _controller(client, gate);
 
-        final refusal = await controller.forgetPairing();
+        final result = await controller.forgetPairing();
 
         expect(gate.requested, [PrivilegedAction.revokeAccess]);
         // The legitimate operator still has their pairing.
         expect(client.paired, isTrue);
-        expect(refusal, isA<LocalAuthRequiredException>());
+        expect(result.outcome, PairingRemovalOutcome.refused);
+        expect(result.message, contains('requires device authentication'));
         // A cancelled prompt must not drop the shell into its failure state.
         expect(controller.error, isNull);
       },
@@ -341,13 +342,22 @@ class _RecordingBrainClient implements BrainClient {
   bool paired = false;
 
   @override
-  Future<void> forgetPairing() async => paired = false;
+  Future<PairingRemoval> forgetPairing({bool localOnly = false}) async {
+    paired = false;
+    return PairingRemoval.revoked;
+  }
 
   @override
   Future<List<PairedBrain>> pairedBrains() async => const [];
 
   @override
-  Future<void> removePairedBrain(Uri origin) async => paired = false;
+  Future<PairingRemoval> removePairedBrain(
+    Uri origin, {
+    bool localOnly = false,
+  }) async {
+    paired = false;
+    return PairingRemoval.revoked;
+  }
 
   @override
   Future<BrainProfile> selectPairedBrain(Uri origin) => getProfile();

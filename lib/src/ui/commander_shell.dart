@@ -6,7 +6,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../brand.dart';
 import '../domain/brain_client.dart';
 import '../network/managed_network.dart';
-import '../security/local_auth_gate.dart';
 import '../state/commander_controller.dart';
 
 const _destinations = [
@@ -345,7 +344,32 @@ final class _FailureView extends StatelessWidget {
   });
   final Object error;
   final VoidCallback retry;
-  final Future<LocalAuthRequiredException?> Function() resetPairing;
+  final Future<PairingRemovalResult> Function({bool localOnly}) resetPairing;
+
+  /// Removes the pairing from the one screen an operator reaches when nothing
+  /// else works, so a Brain that is down cannot trap them here.
+  Future<void> _removePairing(BuildContext context) async {
+    final result = await removePairingWithOfflineFallback(
+      context: context,
+      brain: null,
+      removal: resetPairing,
+    );
+    if (!context.mounted) return;
+    final message = switch (result.outcome) {
+      PairingRemovalOutcome.revoked => null,
+      PairingRemovalOutcome.consoleRevocationRequired =>
+        'Removed from this device. It is still active on the Brain until an '
+            'operator revokes it from the Brain console.',
+      PairingRemovalOutcome.brainUnreachable ||
+      PairingRemovalOutcome.refused ||
+      PairingRemovalOutcome.failed =>
+        result.message,
+    };
+    if (message == null) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -376,13 +400,7 @@ final class _FailureView extends StatelessWidget {
                   runSpacing: 12,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: () async {
-                        final refusal = await resetPairing();
-                        if (refusal == null || !context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(refusal.message)),
-                        );
-                      },
+                      onPressed: () => _removePairing(context),
                       icon: const Icon(Icons.phonelink_erase),
                       label: const Text('Remove paired Brain'),
                     ),
@@ -1400,6 +1418,11 @@ final class BrainProfileDialog extends StatefulWidget {
 final class _BrainProfileDialogState extends State<BrainProfileDialog> {
   final _enrollment = TextEditingController();
   String? _message;
+
+  /// What just happened, when it is not a failure. Kept apart from [_message]
+  /// so "removed, but still active on the Brain" does not read as an error the
+  /// operator can ignore.
+  String? _notice;
   bool _busy = false;
 
   @override
@@ -1587,6 +1610,10 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
                   ),
                 ),
               ],
+              if (_notice case final notice?) ...[
+                const SizedBox(height: 12),
+                Semantics(liveRegion: true, child: Text(notice)),
+              ],
               const SizedBox(height: 12),
               Text(
                 'The Brain origin and one-time token come from the protected '
@@ -1643,15 +1670,28 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
     setState(() => _message = null);
   }
 
+  /// Removes the pairing in use. The list is authoritative about which one
+  /// that is; the profile only stands in when a credential is stored but no
+  /// longer readable.
   Future<void> _forgetPairing() async {
-    final refusal = await widget.controller.forgetPairing();
+    final profile = widget.controller.profile!;
+    final active =
+        widget.controller.pairedBrains
+            .where((brain) => brain.active)
+            .firstOrNull ??
+        PairedBrain(
+          origin: profile.endpoint,
+          deviceId: profile.identity,
+          deviceLabel: profile.name,
+          active: true,
+        );
+    await _remove(active);
     if (!mounted) return;
-    if (refusal != null) {
-      setState(() => _message = refusal.message);
-      return;
+    // Another pairing may have taken over, so this closes only when there is
+    // no paired Brain left to look at.
+    if (widget.controller.profile?.mode != ConnectionMode.paired) {
+      Navigator.pop(context);
     }
-    if (widget.controller.error != null) return;
-    Navigator.pop(context);
   }
 
   /// Commands a different Brain this device is already paired to.
@@ -1674,25 +1714,122 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
     setState(() {
       _busy = true;
       _message = null;
+      _notice = null;
     });
-    try {
-      final refusal = await widget.controller.removePairing(brain.origin);
-      if (!mounted) return;
-      setState(() => _message = refusal?.message ?? _removalFailure());
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  String? _removalFailure() {
-    final error = widget.controller.error;
-    return error == null ? null : '$error';
+    final result = await removePairingWithOfflineFallback(
+      context: context,
+      brain: brain,
+      removal: ({bool localOnly = false}) =>
+          widget.controller.removePairing(brain.origin, localOnly: localOnly),
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = switch (result.outcome) {
+        PairingRemovalOutcome.brainUnreachable ||
+        PairingRemovalOutcome.refused ||
+        PairingRemovalOutcome.failed => result.message,
+        PairingRemovalOutcome.revoked ||
+        PairingRemovalOutcome.consoleRevocationRequired => null,
+      };
+      _notice = switch (result.outcome) {
+        PairingRemovalOutcome.revoked =>
+          '${brain.origin.host} was revoked and removed from this device.',
+        PairingRemovalOutcome.consoleRevocationRequired =>
+          'Removed from this device. Device ${brain.deviceId} is still active '
+              'on ${brain.origin.host} — revoke it from that Brain\'s console.',
+        PairingRemovalOutcome.brainUnreachable ||
+        PairingRemovalOutcome.refused ||
+        PairingRemovalOutcome.failed => null,
+      };
+    });
   }
 
   Future<void> _showManagedNetwork() {
     return showDialog<void>(
       context: context,
       builder: (context) => ManagedNetworkDialog(controller: widget.controller),
+    );
+  }
+}
+
+/// Removes a pairing, and only if the Brain could not be reached to revoke it,
+/// offers to remove it from this device alone.
+///
+/// The server-side revocation is always attempted first and is never skipped
+/// because it might fail: a credential that can still be revoked must be. The
+/// offline path exists so that a Brain which is down, unreachable, or refusing
+/// its own certificate cannot leave the operator with a device they are unable
+/// to clear.
+Future<PairingRemovalResult> removePairingWithOfflineFallback({
+  required BuildContext context,
+  required PairedBrain? brain,
+  required Future<PairingRemovalResult> Function({bool localOnly}) removal,
+}) async {
+  final attempt = await removal();
+  if (attempt.outcome != PairingRemovalOutcome.brainUnreachable ||
+      !context.mounted) {
+    return attempt;
+  }
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) =>
+        _LocalRemovalDialog(brain: brain, reason: attempt.message),
+  );
+  if (confirmed != true) return attempt;
+  return removal(localOnly: true);
+}
+
+final class _LocalRemovalDialog extends StatelessWidget {
+  const _LocalRemovalDialog({required this.brain, required this.reason});
+
+  final PairedBrain? brain;
+  final String? reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final host = brain?.origin.host;
+    return AlertDialog(
+      icon: const Icon(Icons.link_off),
+      title: const Text('Remove without revoking?'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Commander could not reach ${host ?? 'the paired Brain'} to '
+              'revoke this device, so nothing has been removed yet.',
+            ),
+            if (reason case final message?) ...[
+              const SizedBox(height: 10),
+              Text(message, style: Theme.of(context).textTheme.bodySmall),
+            ],
+            const SizedBox(height: 14),
+            Text(
+              brain == null
+                  ? 'Removing it here deletes only the key held on this '
+                        'device. The device stays active on the Brain until an '
+                        'operator revokes it from the Brain console.'
+                  : 'Removing it here deletes only the key held on this '
+                        'device. Device ${brain!.deviceId} stays active on '
+                        '$host until an operator revokes it from that Brain\'s '
+                        'console.',
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Keep the pairing'),
+        ),
+        FilledButton.tonal(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Remove from this device only'),
+        ),
+      ],
     );
   }
 }

@@ -520,11 +520,14 @@ final class CommanderBrainClient implements BrainClient {
   }
 
   @override
-  Future<void> forgetPairing() async {
-    if (await _vault.protection() != VaultProtection.operatingSystem) return;
+  Future<PairingRemoval> forgetPairing({bool localOnly = false}) async {
+    if (await _vault.protection() != VaultProtection.operatingSystem) {
+      return PairingRemoval.revoked;
+    }
     final origin = await _vault.activeOrigin();
-    if (origin == null) return;
-    return removePairedBrain(origin);
+    // Fixture mode holds no credential, so nothing is left behind anywhere.
+    if (origin == null) return PairingRemoval.revoked;
+    return removePairedBrain(origin, localOnly: localOnly);
   }
 
   @override
@@ -585,19 +588,45 @@ final class CommanderBrainClient implements BrainClient {
   }
 
   @override
-  Future<void> removePairedBrain(Uri origin) async {
+  Future<PairingRemoval> removePairedBrain(
+    Uri origin, {
+    bool localOnly = false,
+  }) async {
     final credential = await _storedCredential(origin);
-    if (credential != null) {
+    if (credential == null) {
+      // Nothing is stored, so nothing is owed to the Brain either. Any pin
+      // left over from a half-finished pairing still goes.
+      await _forgetLocally(origin);
+      return PairingRemoval.revoked;
+    }
+    var removal = PairingRemoval.consoleRevocationRequired;
+    if (!localOnly) {
       try {
         await _revoke(credential);
+        removal = PairingRemoval.revoked;
       } on CommanderTransportException catch (error) {
-        // A Brain that rejects us, or one we refuse to talk to because its
-        // certificate changed, can never be reached again. Local removal has
-        // to stay possible in both cases or the operator is stranded.
-        if (!error.authorizationRejected && !error.certificateChanged) rethrow;
+        if (error.authorizationRejected) {
+          // Already revoked from the console. The local seed is confirmed
+          // worthless and deleting it is all that is left to do.
+          removal = PairingRemoval.revoked;
+        } else if (!error.certificateChanged) {
+          // The Brain may be reachable again in a minute, and this request may
+          // even have arrived. Change nothing, and let the operator choose the
+          // local-only path knowing what it leaves behind.
+          throw BrainUnreachableException(
+            origin: origin,
+            deviceId: credential.deviceId,
+            message:
+                'Commander could not reach ${origin.host} to revoke device '
+                '${credential.deviceId}. $error',
+          );
+        }
+        // A certificate that changed means Commander will never talk to this
+        // Brain again, so the device row there outlives the local credential.
       }
     }
     await _forgetLocally(origin);
+    return removal;
   }
 
   Future<Map<String, dynamic>> _revoke(DeviceCredential credential) => _request(

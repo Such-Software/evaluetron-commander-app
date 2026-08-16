@@ -185,16 +185,21 @@ class _RecoveringBrainClient implements BrainClient {
   bool paired = true;
 
   @override
-  Future<void> forgetPairing() async {
+  Future<PairingRemoval> forgetPairing({bool localOnly = false}) async {
     paired = false;
+    return PairingRemoval.revoked;
   }
 
   @override
   Future<List<PairedBrain>> pairedBrains() async => const [];
 
   @override
-  Future<void> removePairedBrain(Uri origin) async {
+  Future<PairingRemoval> removePairedBrain(
+    Uri origin, {
+    bool localOnly = false,
+  }) async {
     paired = false;
+    return PairingRemoval.revoked;
   }
 
   @override

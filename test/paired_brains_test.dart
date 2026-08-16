@@ -184,6 +184,64 @@ void main() {
     });
   });
 
+  group('a Brain that cannot be reached still lets the device be cleared', () {
+    test('an unreachable Brain keeps the credential rather than erroring', () async {
+      final setup = await _pairedTwice();
+      setup.transport.respond = (method, path, body) =>
+          throw const BrainNetworkException('Connection refused');
+
+      await expectLater(
+        setup.client.removePairedBrain(_secondOrigin),
+        throwsA(
+          isA<BrainUnreachableException>()
+              .having((e) => e.origin, 'origin', _secondOrigin)
+              .having((e) => e.deviceId, 'deviceId', _secondDevice)
+              .having((e) => e.message, 'message', contains(_secondDevice))
+              .having((e) => e.message, 'message', contains('Connection refused')),
+        ),
+      );
+      // Nothing was removed, so retrying later is still the better option.
+      expect(await setup.vault.read(_secondOrigin), isNotNull);
+      expect(await setup.vault.activeOrigin(), _secondOrigin);
+    });
+
+    test('a local-only removal clears the device and says so', () async {
+      final setup = await _pairedTwice();
+      setup.transport.respond = (method, path, body) =>
+          throw const BrainNetworkException('Connection refused');
+
+      final removal = await setup.client.removePairedBrain(
+        _secondOrigin,
+        localOnly: true,
+      );
+
+      expect(removal, PairingRemoval.consoleRevocationRequired);
+      expect(await setup.vault.read(_secondOrigin), isNull);
+      expect(await setup.vault.activeOrigin(), _firstOrigin);
+    });
+
+    test('a revocation that could succeed is never skipped', () async {
+      final setup = await _pairedTwice();
+
+      expect(
+        await setup.client.removePairedBrain(_secondOrigin),
+        PairingRemoval.revoked,
+      );
+      expect(_revoked(setup.transport), [_secondOrigin]);
+    });
+
+    test('a Brain that already revoked us needs no console visit', () async {
+      final setup = await _pairedTwice();
+      setup.transport.respond = _brain(_secondDevice, revokeStatus: 401);
+
+      expect(
+        await setup.client.removePairedBrain(_secondOrigin),
+        PairingRemoval.revoked,
+      );
+      expect(await setup.vault.read(_secondOrigin), isNull);
+    });
+  });
+
   testWidgets('the profile dialog lists, switches and removes pairings', (
     tester,
   ) async {
@@ -222,6 +280,58 @@ void main() {
     expect(_revoked(setup.transport), [_secondOrigin]);
     expect(await setup.vault.read(_secondOrigin), isNull);
     expect(find.text(_secondOrigin.host), findsNothing);
+  });
+
+  testWidgets('an unreachable Brain offers a clearly labelled local removal', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final setup = await _pairedTwice();
+
+    await tester.pumpWidget(
+      CommanderApp(client: setup.client, localAuth: setup.gate),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Open Brain profile'));
+    await tester.pumpAndSettle();
+
+    // The revoke never lands. Everything else about this Brain still works,
+    // which is what keeps the shell readable while the choice is made.
+    final reachable = _brain(_secondDevice);
+    setup.transport.respond = (method, path, body) =>
+        path == '/api/commander/v1/revoke'
+        ? throw const BrainNetworkException('Connection refused')
+        : reachable(method, path, body);
+
+    await tester.tap(find.byTooltip('Remove ${_firstOrigin.host}'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Remove without revoking?'), findsOneWidget);
+    expect(find.textContaining(_firstDevice), findsWidgets);
+    expect(
+      find.textContaining('revokes it from that Brain\'s console'),
+      findsOneWidget,
+    );
+
+    // Declining changes nothing at all.
+    await tester.tap(find.text('Keep the pairing'));
+    await tester.pumpAndSettle();
+    expect(await setup.vault.read(_firstOrigin), isNotNull);
+
+    await tester.tap(find.byTooltip('Remove ${_firstOrigin.host}'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from this device only'));
+    await tester.pumpAndSettle();
+
+    expect(await setup.vault.read(_firstOrigin), isNull);
+    expect(await setup.vault.read(_secondOrigin), isNotNull);
+    expect(
+      find.textContaining('is still active on ${_firstOrigin.host}'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a refused presence proof leaves both pairings alone', (

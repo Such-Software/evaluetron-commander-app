@@ -4,6 +4,33 @@ import '../domain/brain_client.dart';
 import '../network/managed_network.dart';
 import '../security/local_auth_gate.dart';
 
+/// What an attempt to remove a pairing achieved.
+enum PairingRemovalOutcome {
+  /// Removed from this device and revoked on the Brain.
+  revoked,
+
+  /// Removed from this device only. The device is still active on the Brain
+  /// until an operator revokes it from the console there.
+  consoleRevocationRequired,
+
+  /// Nothing changed: the Brain could not be reached to revoke this device.
+  /// The operator may retry, or remove the credential locally on purpose.
+  brainUnreachable,
+
+  /// Nothing changed: local authentication did not succeed.
+  refused,
+
+  /// Nothing changed: the removal failed for some other reason.
+  failed,
+}
+
+/// Outcome of a removal, with the operator-facing reason whenever the removal
+/// changed nothing.
+typedef PairingRemovalResult = ({
+  PairingRemovalOutcome outcome,
+  String? message,
+});
+
 final class CommanderController extends ChangeNotifier {
   CommanderController(this._client, this._managedNetwork, this._localAuth);
 
@@ -169,36 +196,59 @@ final class CommanderController extends ChangeNotifier {
 
   /// Revokes and removes this Commander.
   ///
-  /// Returns the refusal when local authentication did not succeed, so the
-  /// caller can show it where the operator asked, instead of dropping the
-  /// whole shell into its failure state over a cancelled prompt.
-  Future<LocalAuthRequiredException?> forgetPairing() =>
-      _removePairing(_client.forgetPairing);
+  /// Reports why nothing happened rather than throwing, so the caller can show
+  /// it where the operator asked instead of dropping the whole shell into its
+  /// failure state over a cancelled prompt or an unreachable Brain.
+  Future<PairingRemovalResult> forgetPairing({bool localOnly = false}) =>
+      _removePairing(() => _client.forgetPairing(localOnly: localOnly));
 
   /// Revokes and removes one paired Brain, which may not be the active one.
-  Future<LocalAuthRequiredException?> removePairing(Uri origin) =>
-      _removePairing(() => _client.removePairedBrain(origin));
+  Future<PairingRemovalResult> removePairing(
+    Uri origin, {
+    bool localOnly = false,
+  }) => _removePairing(
+    () => _client.removePairedBrain(origin, localOnly: localOnly),
+  );
 
-  Future<LocalAuthRequiredException?> _removePairing(
-    Future<void> Function() removal,
+  Future<PairingRemovalResult> _removePairing(
+    Future<PairingRemoval> Function() removal,
   ) async {
     try {
       await _stepUp(PrivilegedAction.revokeAccess);
     } on LocalAuthRequiredException catch (refusal) {
-      return refusal;
+      return (
+        outcome: PairingRemovalOutcome.refused,
+        message: refusal.message,
+      );
     }
     loading = true;
     error = null;
     notifyListeners();
+    final PairingRemoval removed;
     try {
-      await removal();
-    } catch (caught) {
-      error = caught;
+      removed = await removal();
+    } on BrainUnreachableException catch (unreachable) {
+      // Not a shell-wide failure: the pairing is intact and the operator has a
+      // decision to make about it.
       loading = false;
       notifyListeners();
-      return null;
+      return (
+        outcome: PairingRemovalOutcome.brainUnreachable,
+        message: unreachable.message,
+      );
+    } catch (caught) {
+      loading = false;
+      notifyListeners();
+      return (outcome: PairingRemovalOutcome.failed, message: '$caught');
     }
     await load();
-    return null;
+    return (
+      outcome: switch (removed) {
+        PairingRemoval.revoked => PairingRemovalOutcome.revoked,
+        PairingRemoval.consoleRevocationRequired =>
+          PairingRemovalOutcome.consoleRevocationRequired,
+      },
+      message: null,
+    );
   }
 }
