@@ -592,6 +592,19 @@ final class CommanderBrainClient implements BrainClient {
     Uri origin, {
     bool localOnly = false,
   }) async {
+    if (await _vault.protection() != VaultProtection.operatingSystem) {
+      return PairingRemoval.revoked;
+    }
+    if (localOnly) {
+      // Deliberately reads no credential. This path exists for a pairing that
+      // cannot be used at all, so it must not depend on being able to unlock
+      // or even parse the record it is deleting.
+      final stored = (await _vault.origins()).contains(origin);
+      await _forgetLocally(origin);
+      return stored
+          ? PairingRemoval.consoleRevocationRequired
+          : PairingRemoval.revoked;
+    }
     final credential = await _storedCredential(origin);
     if (credential == null) {
       // Nothing is stored, so nothing is owed to the Brain either. Any pin
@@ -599,31 +612,28 @@ final class CommanderBrainClient implements BrainClient {
       await _forgetLocally(origin);
       return PairingRemoval.revoked;
     }
-    var removal = PairingRemoval.consoleRevocationRequired;
-    if (!localOnly) {
-      try {
-        await _revoke(credential);
-        removal = PairingRemoval.revoked;
-      } on CommanderTransportException catch (error) {
-        if (error.authorizationRejected) {
-          // Already revoked from the console. The local seed is confirmed
-          // worthless and deleting it is all that is left to do.
-          removal = PairingRemoval.revoked;
-        } else if (!error.certificateChanged) {
-          // The Brain may be reachable again in a minute, and this request may
-          // even have arrived. Change nothing, and let the operator choose the
-          // local-only path knowing what it leaves behind.
-          throw BrainUnreachableException(
-            origin: origin,
-            deviceId: credential.deviceId,
-            message:
-                'Commander could not reach ${origin.host} to revoke device '
-                '${credential.deviceId}. $error',
-          );
-        }
-        // A certificate that changed means Commander will never talk to this
-        // Brain again, so the device row there outlives the local credential.
+    var removal = PairingRemoval.revoked;
+    try {
+      await _revoke(credential);
+    } on CommanderTransportException catch (error) {
+      if (error.certificateChanged) {
+        // Commander will never talk to this Brain again, so the device row
+        // there outlives the local credential.
+        removal = PairingRemoval.consoleRevocationRequired;
+      } else if (!error.authorizationRejected) {
+        // The Brain may be reachable again in a minute, and this request may
+        // even have arrived. Change nothing, and let the operator choose the
+        // local-only path knowing what it leaves behind.
+        throw BrainUnreachableException(
+          origin: origin,
+          deviceId: credential.deviceId,
+          message:
+              'Commander could not reach ${origin.host} to revoke device '
+              '${credential.deviceId}. $error',
+        );
       }
+      // A 401 means the console already revoked it: the local seed is
+      // confirmed worthless and deleting it is all that is left to do.
     }
     await _forgetLocally(origin);
     return removal;

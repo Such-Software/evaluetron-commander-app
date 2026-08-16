@@ -299,6 +299,33 @@ void main() {
       expect(await setup.vault.activeOrigin(), _firstOrigin);
     });
 
+    test('a local-only removal does not depend on the unlock', () async {
+      final setup = await _pairedTwice();
+      // A fresh process, and an operator who cannot pass the check at all.
+      setup.gate.outcome = LocalAuthOutcome.rejected;
+      final restarted = CommanderBrainClient(
+        vault: setup.vault,
+        localAuth: setup.gate,
+        pins: MemoryBrainCertificatePinStore(),
+        transport: setup.transport,
+      );
+
+      // Signing a revocation still needs the credential, so it is still gated.
+      await expectLater(
+        restarted.removePairedBrain(_firstOrigin),
+        throwsA(isA<LocalAuthRequiredException>()),
+      );
+      expect(await setup.vault.read(_firstOrigin), isNotNull);
+
+      // Deleting a credential this device cannot use is not.
+      expect(
+        await restarted.removePairedBrain(_firstOrigin, localOnly: true),
+        PairingRemoval.consoleRevocationRequired,
+      );
+      expect(await setup.vault.read(_firstOrigin), isNull);
+      expect(_revoked(setup.transport), isEmpty);
+    });
+
     test('a revocation that could succeed is never skipped', () async {
       final setup = await _pairedTwice();
 
