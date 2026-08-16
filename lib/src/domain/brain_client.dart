@@ -219,7 +219,10 @@ abstract interface class BrainClient {
   /// leaves the device active there. Never take it without the operator's
   /// explicit consent — a revocation that could have succeeded must not be
   /// skipped silently.
-  Future<PairingRemoval> removePairedBrain(Uri origin, {bool localOnly = false});
+  Future<PairingRemoval> removePairedBrain(
+    Uri origin, {
+    bool localOnly = false,
+  });
 
   /// Exchanges a one-time enrollment for a locally generated, revocable
   /// public-key device identity.

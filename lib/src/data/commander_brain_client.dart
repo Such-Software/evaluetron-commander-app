@@ -820,7 +820,25 @@ final class CommanderBrainClient implements BrainClient {
       publicKey: keyPair.publicKey,
       scopes: _strings(device['scopes']).toSet(),
     );
-    final profile = await _profileFor(credential);
+    // From here the Brain has committed the device row and spent the one-time
+    // enrollment. Throwing the seed away without revoking would leave an
+    // active device on the Brain that nobody on earth holds a key for, so the
+    // row is retired with the credential that is about to be discarded.
+    final BrainProfile profile;
+    try {
+      profile = await _profileFor(credential);
+    } on Object catch (error) {
+      throw CommanderTransportException(
+        await _tryRevoke(credential)
+            ? 'Pairing could not be completed: $error The device Commander had '
+                  'just created was revoked again, so nothing was left active '
+                  'on the Brain. Create a new enrollment and pair again.'
+            : 'Pairing could not be completed: $error Commander could not '
+                  'revoke the device it had just created: revoke device '
+                  '${credential.deviceId} from the operator console. The '
+                  'enrollment is spent, so pairing again needs a new one.',
+      );
+    }
     // Pairing an origin that is already paired replaces the credential this
     // device holds for it, which strands the device row the old key belonged
     // to. Retire it rather than leaving an active row nobody holds a key for.

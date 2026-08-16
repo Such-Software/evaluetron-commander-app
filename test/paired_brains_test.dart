@@ -93,9 +93,13 @@ Future<_Setup> _client() async {
 /// second Brain without touching the first.
 Future<_Setup> _pairedTwice() async {
   final setup = await _client();
-  await setup.client.pair(PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))));
+  await setup.client.pair(
+    PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+  );
   setup.transport.respond = _brain(_secondDevice, label: 'Lab Brain');
-  await setup.client.pair(PairingRequest(enrollmentUri: Uri.parse(_enrollment(_secondOrigin))));
+  await setup.client.pair(
+    PairingRequest(enrollmentUri: Uri.parse(_enrollment(_secondOrigin))),
+  );
   return setup;
 }
 
@@ -133,10 +137,7 @@ void main() {
       expect(profile.identity, _firstDevice);
       expect(profile.endpoint, _firstOrigin);
       expect(await setup.vault.activeOrigin(), _firstOrigin);
-      expect(
-        (await setup.client.pairedBrains()).first.origin,
-        _firstOrigin,
-      );
+      expect((await setup.client.pairedBrains()).first.origin, _firstOrigin);
     });
 
     test('removing a pairing revokes it on its own Brain', () async {
@@ -145,10 +146,9 @@ void main() {
       await setup.client.removePairedBrain(_firstOrigin);
 
       expect(_revoked(setup.transport), [_firstOrigin]);
-      expect(
-        (await setup.client.pairedBrains()).map((brain) => brain.origin),
-        [_secondOrigin],
-      );
+      expect((await setup.client.pairedBrains()).map((brain) => brain.origin), [
+        _secondOrigin,
+      ]);
       expect(await setup.vault.read(_firstOrigin), isNull);
       expect(await setup.vault.read(_secondOrigin), isNotNull);
     });
@@ -184,26 +184,105 @@ void main() {
     });
   });
 
-  group('a Brain that cannot be reached still lets the device be cleared', () {
-    test('an unreachable Brain keeps the credential rather than erroring', () async {
-      final setup = await _pairedTwice();
-      setup.transport.respond = (method, path, body) =>
-          throw const BrainNetworkException('Connection refused');
+  group('a pairing that cannot be finished leaves nothing behind', () {
+    /// Pairs, then fails the profile check that follows it. The Brain has
+    /// already committed the device row and spent the enrollment by then.
+    Future<_Setup> halfPaired({required bool revokeWorks}) async {
+      final setup = await _client();
+      setup.transport.respond = (method, path, body) => switch (path) {
+        '/api/commander/v1/pair' => jsonResponse({
+          'ok': true,
+          'apiVersion': 1,
+          'device': {
+            'id': _firstDevice,
+            'label': 'Operator phone',
+            'scopes': ['brain:read'],
+          },
+        }),
+        '/api/commander/v1/revoke' => jsonResponse({
+          'ok': revokeWorks,
+        }, statusCode: revokeWorks ? 200 : 503),
+        _ => jsonResponse({
+          'ok': false,
+          'error': 'profile unavailable',
+        }, statusCode: 500),
+      };
+      return setup;
+    }
+
+    test('the device it created is revoked again', () async {
+      final setup = await halfPaired(revokeWorks: true);
 
       await expectLater(
-        setup.client.removePairedBrain(_secondOrigin),
+        setup.client.pair(
+          PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+        ),
         throwsA(
-          isA<BrainUnreachableException>()
-              .having((e) => e.origin, 'origin', _secondOrigin)
-              .having((e) => e.deviceId, 'deviceId', _secondDevice)
-              .having((e) => e.message, 'message', contains(_secondDevice))
-              .having((e) => e.message, 'message', contains('Connection refused')),
+          isA<CommanderTransportException>()
+              .having(
+                (e) => e.message,
+                'message',
+                contains('profile unavailable'),
+              )
+              .having((e) => e.message, 'message', contains('revoked again')),
         ),
       );
-      // Nothing was removed, so retrying later is still the better option.
-      expect(await setup.vault.read(_secondOrigin), isNotNull);
-      expect(await setup.vault.activeOrigin(), _secondOrigin);
+
+      expect(_revoked(setup.transport), [_firstOrigin]);
+      expect(await setup.client.pairedBrains(), isEmpty);
+      expect(await setup.vault.read(_firstOrigin), isNull);
     });
+
+    test('a failed cleanup names the device id to revoke by hand', () async {
+      final setup = await halfPaired(revokeWorks: false);
+
+      await expectLater(
+        setup.client.pair(
+          PairingRequest(enrollmentUri: Uri.parse(_enrollment(_firstOrigin))),
+        ),
+        throwsA(
+          isA<CommanderTransportException>()
+              .having((e) => e.message, 'message', contains(_firstDevice))
+              .having(
+                (e) => e.message,
+                'message',
+                contains('operator console'),
+              ),
+        ),
+      );
+
+      expect(_revoked(setup.transport), [_firstOrigin], reason: 'it was tried');
+      expect(await setup.vault.read(_firstOrigin), isNull);
+    });
+  });
+
+  group('a Brain that cannot be reached still lets the device be cleared', () {
+    test(
+      'an unreachable Brain keeps the credential rather than erroring',
+      () async {
+        final setup = await _pairedTwice();
+        setup.transport.respond = (method, path, body) =>
+            throw const BrainNetworkException('Connection refused');
+
+        await expectLater(
+          setup.client.removePairedBrain(_secondOrigin),
+          throwsA(
+            isA<BrainUnreachableException>()
+                .having((e) => e.origin, 'origin', _secondOrigin)
+                .having((e) => e.deviceId, 'deviceId', _secondDevice)
+                .having((e) => e.message, 'message', contains(_secondDevice))
+                .having(
+                  (e) => e.message,
+                  'message',
+                  contains('Connection refused'),
+                ),
+          ),
+        );
+        // Nothing was removed, so retrying later is still the better option.
+        expect(await setup.vault.read(_secondOrigin), isNotNull);
+        expect(await setup.vault.activeOrigin(), _secondOrigin);
+      },
+    );
 
     test('a local-only removal clears the device and says so', () async {
       final setup = await _pairedTwice();

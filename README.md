@@ -36,6 +36,12 @@ valid on its own Brain, so it is listed in the Brain profile dialog with the
 device id it carries, and can be switched to or removed there. Removing a
 pairing revokes it on that Brain first, then deletes the local seed.
 
+A pairing that the Brain commits but that Commander cannot finish — the signed
+profile check after it fails — is cleaned up rather than abandoned. The device
+row exists on the Brain by then and the one-time enrollment is spent, so the
+credential that is about to be discarded is used to revoke that row first. If
+even that fails, the error names the device id to revoke from the console.
+
 A removal always asks the Brain to revoke the device first, and never skips
 that because it might fail. When the Brain answers, the credential is deleted
 either way: a `401` means the console already revoked it, and a changed

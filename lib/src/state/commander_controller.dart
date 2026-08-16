@@ -216,10 +216,7 @@ final class CommanderController extends ChangeNotifier {
     try {
       await _stepUp(PrivilegedAction.revokeAccess);
     } on LocalAuthRequiredException catch (refusal) {
-      return (
-        outcome: PairingRemovalOutcome.refused,
-        message: refusal.message,
-      );
+      return (outcome: PairingRemovalOutcome.refused, message: refusal.message);
     }
     loading = true;
     error = null;

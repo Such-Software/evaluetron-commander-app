@@ -49,7 +49,10 @@ void main() {
     expect(await vault.activeOrigin(), second.brainOrigin);
     // The first credential is still there, which is exactly why the operator
     // has to be able to see it.
-    expect((await vault.read(credential.brainOrigin))?.deviceId, credential.deviceId);
+    expect(
+      (await vault.read(credential.brainOrigin))?.deviceId,
+      credential.deviceId,
+    );
   });
 
   test('the active credential can be switched between pairings', () async {

@@ -362,8 +362,7 @@ final class _FailureView extends StatelessWidget {
             'operator revokes it from the Brain console.',
       PairingRemovalOutcome.brainUnreachable ||
       PairingRemovalOutcome.refused ||
-      PairingRemovalOutcome.failed =>
-        result.message,
+      PairingRemovalOutcome.failed => result.message,
     };
     if (message == null) return;
     ScaffoldMessenger.of(
