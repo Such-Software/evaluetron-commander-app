@@ -16,6 +16,8 @@ final class CommanderTransportException implements Exception {
     this.message, {
     this.authorizationRejected = false,
     this.certificateChanged = false,
+    this.statusCode,
+    this.retryAfter,
   });
   final String message;
   final bool authorizationRejected;
@@ -24,8 +26,11 @@ final class CommanderTransportException implements Exception {
   /// Callers must not react by deleting the credential.
   final bool certificateChanged;
 
-  @override
-  String toString() => message;
+  /// HTTP status, when the Brain actually answered.
+  final int? statusCode;
+
+  /// How long the Brain asked Commander to wait, from `Retry-After`.
+  final Duration? retryAfter;
 }
 
 final class CommanderBrainClient implements BrainClient {
@@ -248,17 +253,79 @@ final class CommanderBrainClient implements BrainClient {
     if (response.statusCode < 200 ||
         response.statusCode >= 300 ||
         decoded['ok'] != true) {
-      if (response.statusCode == 401) {
-        throw const CommanderTransportException(
-          'Commander authorization was rejected. Pair again or review device scopes.',
-          authorizationRejected: true,
-        );
-      }
-      throw CommanderTransportException(
-        'Brain request failed (${response.statusCode}).',
-      );
+      throw _failure(response, _reason(decoded['error']));
     }
     return decoded;
+  }
+
+  /// Builds the operator-facing failure, keeping the Brain's own explanation.
+  ///
+  /// Collapsing "invalid or expired Commander enrollment", "already paired"
+  /// and "too many requests" all into `Brain request failed (401)` left the
+  /// operator with nothing to act on.
+  CommanderTransportException _failure(BrainResponse response, String? reason) {
+    final retryAfter = _retryAfter(response.retryAfter);
+    final wait = retryAfter == null
+        ? ''
+        : ' Try again in ${retryAfter.inSeconds} second'
+              '${retryAfter.inSeconds == 1 ? '' : 's'}.';
+    return switch (response.statusCode) {
+      401 => CommanderTransportException(
+        reason == null
+            ? 'Commander authorization was rejected. Pair again or review '
+                  'device scopes.'
+            : 'Commander authorization was rejected: $reason. Pair again or '
+                  'review device scopes.',
+        authorizationRejected: true,
+        statusCode: 401,
+      ),
+      429 => CommanderTransportException(
+        '${reason ?? 'The Brain is rate limiting Commander.'}$wait',
+        statusCode: 429,
+        retryAfter: retryAfter,
+      ),
+      final status => CommanderTransportException(
+        reason == null
+            ? 'Brain request failed ($status).'
+            : 'Brain request failed ($status): $reason.$wait',
+        statusCode: status,
+        retryAfter: retryAfter,
+      ),
+    };
+  }
+
+  /// Accepts the Brain's `error` field as a bounded, single-line string.
+  ///
+  /// The Brain is authenticated by the certificate pin, but its text still
+  /// reaches operator-facing UI, so it is length-capped and stripped of
+  /// control characters rather than passed through verbatim.
+  static String? _reason(Object? value) {
+    if (value is! String) return null;
+    final cleaned = value
+        .replaceAll(RegExp(r'[\x00-\x1f\x7f]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (cleaned.isEmpty) return null;
+    return cleaned.length <= 200 ? cleaned : '${cleaned.substring(0, 199)}…';
+  }
+
+  /// Parses `Retry-After` in both permitted forms: delta-seconds and
+  /// HTTP-date. Anything absurd is ignored rather than trusted.
+  static Duration? _retryAfter(String? value) {
+    if (value == null) return null;
+    const limit = Duration(hours: 24);
+    final seconds = int.tryParse(value.trim());
+    if (seconds != null) {
+      if (seconds < 0 || seconds > limit.inSeconds) return null;
+      return Duration(seconds: seconds);
+    }
+    try {
+      final delta = HttpDate.parse(value).difference(DateTime.now().toUtc());
+      if (delta > limit) return null;
+      return delta.isNegative ? Duration.zero : delta;
+    } on Object {
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>> _signedGet(
