@@ -32,7 +32,7 @@ SharedPreferences, ordinary files, logs, analytics, or crash reports.
 
 Commander holds operator authority over a whole fleet, so the operating-system
 lock screen is not accepted as the only barrier. `LocalAuthGate` adds a
-device user-presence check (biometric, PIN, pattern, or password) at four
+device user-presence check (biometric, PIN, pattern, or password) at five
 points:
 
 | Point | Where it is enforced |
