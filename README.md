@@ -135,6 +135,32 @@ review, and store assets.
 
 Bundle/application ID: `com.suchsoftware.evaluetron.commander`
 
+### Android release signing
+
+Release builds are **never** signed with the debug keystore. That key ships
+with every Flutter installation, so a debug-signed release would let anyone
+forge an update to a client holding operator authority over the fleet.
+
+Signing material is supplied out of band through `android/key.properties`,
+which is gitignored along with `*.jks`, `*.keystore`, and `*.p12`. No keystore
+is generated or committed by this repository.
+
+```properties
+storeFile=/absolute/path/to/commander-release.jks
+storePassword=…
+keyAlias=commander
+keyPassword=…
+```
+
+`storeFile` is resolved relative to `android/app/` when it is not absolute, so
+an absolute path is recommended. All four entries are required; a
+`key.properties` that is present but incomplete fails the build with the list
+of missing keys.
+
+When `android/key.properties` is absent the release build emits a warning and
+produces an **unsigned** artifact. That is deliberate: an unsigned build
+cannot be installed or published by accident, whereas a debug-signed one can.
+
 See [architecture](docs/ARCHITECTURE.md) and
 [store readiness](docs/STORE_READINESS.md) for the production boundary and
 remaining release work.
