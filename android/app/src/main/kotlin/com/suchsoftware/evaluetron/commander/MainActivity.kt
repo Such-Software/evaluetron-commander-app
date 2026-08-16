@@ -1,7 +1,7 @@
 package com.suchsoftware.evaluetron.commander
 
 import android.net.VpnService
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -10,8 +10,12 @@ import io.flutter.plugin.common.MethodChannel
  *
  * No tunnel engine is embedded yet. Every mutating method therefore fails
  * closed and the Flutter UI reports that state explicitly.
+ *
+ * Extends [FlutterFragmentActivity] rather than `FlutterActivity` because
+ * AndroidX `BiometricPrompt`, used by the local user-presence gate in front of
+ * privileged operator actions, requires a `FragmentActivity` host.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val CHANNEL =
             "com.suchsoftware.evaluetron.commander/managed_network"

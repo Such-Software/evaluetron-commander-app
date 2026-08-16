@@ -28,6 +28,49 @@ the `SecureCredentialVault` abstraction backed by Keychain, Android Keystore,
 or an equivalent operating-system store. It must never be put in
 SharedPreferences, ordinary files, logs, analytics, or crash reports.
 
+### Local authentication gate
+
+Commander holds operator authority over a whole fleet, so the operating-system
+lock screen is not accepted as the only barrier. `LocalAuthGate` adds a
+device user-presence check (biometric, PIN, pattern, or password) at four
+points:
+
+| Point | Where it is enforced |
+| --- | --- |
+| Activating a stored credential at launch | `CommanderBrainClient._initialCredential` |
+| Returning from the background | `CommanderLockGate` |
+| Submitting a job | `CommanderController.submitJob` |
+| Pairing a Brain | `CommanderController.pair` |
+| Revoking this Commander | `CommanderController.forgetPairing` |
+
+The step-up checks live in the controller rather than in widgets so no UI path
+can reach a privileged action without one.
+
+The gate **fails closed**. A device with no enrolled authenticator, or a
+platform with no `local_auth` implementation, yields
+`LocalAuthOutcome.unavailable`, which refuses the action and says so. It is
+never treated as success. A paired session on such a device cannot be
+unlocked; the deliberate remedy is to enrol a device screen lock.
+
+Fixture mode is intentionally not gated: it carries no operator authority, and
+prompting there would train operators to dismiss the prompt reflexively.
+Pairing is gated even in fixture mode, so authority can never be acquired on
+an unprotected device in the first place.
+
+`VaultProtection` deliberately has no `userPresence` value. The vault stores
+the credential under the operating-system store's at-rest protection and does
+not itself require a biometric to read it back; user presence is the separate,
+explicit concern owned by `LocalAuthGate`.
+
+Known residual gaps, not closed by this gate:
+
+- Frames stop while the app is backgrounded, so the OS app-switcher snapshot
+  is taken *before* the lock screen paints. Blocking it needs `FLAG_SECURE` on
+  Android and a privacy overlay on iOS.
+- The gate is an application-level check. It does not stop an attacker with
+  code execution, a rooted or jailbroken device, or a debug build from reading
+  the credential out of the platform store directly.
+
 `BrainClient` is the transport-independent application contract.
 `FixtureBrainClient` is deterministic local data for development and tests.
 `CommanderBrainClient` switches from fixture data only after authenticated

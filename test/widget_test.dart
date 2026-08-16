@@ -5,6 +5,8 @@ import 'package:evaluetron_commander_app/src/network/managed_network.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/fake_local_auth_gate.dart';
+
 void main() {
   testWidgets('phone shell visibly identifies fixture data', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -12,7 +14,12 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(CommanderApp(client: FixtureBrainClient()));
+    await tester.pumpWidget(
+      CommanderApp(
+        client: FixtureBrainClient(),
+        localAuth: FakeLocalAuthGate(),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Good afternoon'), findsOneWidget);
@@ -33,7 +40,12 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(CommanderApp(client: FixtureBrainClient()));
+    await tester.pumpWidget(
+      CommanderApp(
+        client: FixtureBrainClient(),
+        localAuth: FakeLocalAuthGate(),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Run').first);
@@ -57,7 +69,12 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(CommanderApp(client: FixtureBrainClient()));
+    await tester.pumpWidget(
+      CommanderApp(
+        client: FixtureBrainClient(),
+        localAuth: FakeLocalAuthGate(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Open Brain profile'));
     await tester.pumpAndSettle();
@@ -78,7 +95,9 @@ void main() {
   ) async {
     final client = _RecoveringBrainClient();
 
-    await tester.pumpWidget(CommanderApp(client: client));
+    await tester.pumpWidget(
+      CommanderApp(client: client, localAuth: FakeLocalAuthGate()),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Commander could not load'), findsOneWidget);
@@ -93,7 +112,12 @@ void main() {
   testWidgets('read-only pairing loads without requesting optional scopes', (
     tester,
   ) async {
-    await tester.pumpWidget(CommanderApp(client: _ReadOnlyBrainClient()));
+    await tester.pumpWidget(
+      CommanderApp(
+        client: _ReadOnlyBrainClient(),
+        localAuth: FakeLocalAuthGate(),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Commander could not load'), findsNothing);
@@ -122,6 +146,7 @@ void main() {
     await tester.pumpWidget(
       CommanderApp(
         client: FixtureBrainClient(),
+        localAuth: FakeLocalAuthGate(),
         managedNetwork: const _EngineMissingManagedNetwork(),
       ),
     );

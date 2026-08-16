@@ -3,17 +3,24 @@ import 'package:flutter/material.dart';
 import 'brand.dart';
 import 'domain/brain_client.dart';
 import 'network/managed_network.dart';
+import 'security/local_auth_gate.dart';
 import 'state/commander_controller.dart';
+import 'ui/commander_lock_gate.dart';
 import 'ui/commander_shell.dart';
 
 final class CommanderApp extends StatefulWidget {
   const CommanderApp({
     required this.client,
+    required this.localAuth,
     this.managedNetwork = const UnavailableManagedNetworkPlatform(),
     super.key,
   });
 
   final BrainClient client;
+
+  /// Required rather than defaulted: a build that forgets to supply a gate
+  /// must fail to compile, not silently run without one.
+  final LocalAuthGate localAuth;
   final ManagedNetworkPlatform managedNetwork;
 
   @override
@@ -26,8 +33,11 @@ final class _CommanderAppState extends State<CommanderApp> {
   @override
   void initState() {
     super.initState();
-    _controller = CommanderController(widget.client, widget.managedNetwork)
-      ..load();
+    _controller = CommanderController(
+      widget.client,
+      widget.managedNetwork,
+      widget.localAuth,
+    )..load();
   }
 
   @override
@@ -44,7 +54,11 @@ final class _CommanderAppState extends State<CommanderApp> {
       themeMode: ThemeMode.system,
       theme: buildCommanderTheme(Brightness.light),
       darkTheme: buildCommanderTheme(Brightness.dark),
-      home: CommanderShell(controller: _controller),
+      home: CommanderLockGate(
+        controller: _controller,
+        localAuth: widget.localAuth,
+        child: CommanderShell(controller: _controller),
+      ),
     );
   }
 }

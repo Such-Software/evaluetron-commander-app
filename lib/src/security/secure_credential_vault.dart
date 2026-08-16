@@ -27,7 +27,14 @@ final class DeviceCredential {
   String toString() => 'DeviceCredential(<redacted>)';
 }
 
-enum VaultProtection { operatingSystem, userPresence, unavailable }
+/// How well the platform protects credential material at rest.
+///
+/// There is deliberately no `userPresence` value. This vault stores the
+/// credential under the operating-system store's own at-rest protection and
+/// does not itself require a biometric or passcode to read it back. The
+/// user-presence property is a separate, explicit concern owned by
+/// `LocalAuthGate`; advertising it here would overstate what the vault does.
+enum VaultProtection { operatingSystem, unavailable }
 
 /// Boundary for Keychain, Android Keystore, and desktop secret-service adapters.
 ///

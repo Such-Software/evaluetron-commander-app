@@ -1,18 +1,7 @@
 import 'package:evaluetron_commander_app/src/security/secure_credential_vault.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final class MemorySecureStorage implements SecureStorageAdapter {
-  final values = <String, String>{};
-
-  @override
-  Future<void> delete(String key) async => values.remove(key);
-
-  @override
-  Future<String?> read(String key) async => values[key];
-
-  @override
-  Future<void> write(String key, String value) async => values[key] = value;
-}
+import 'support/memory_secure_storage.dart';
 
 void main() {
   final credential = DeviceCredential(

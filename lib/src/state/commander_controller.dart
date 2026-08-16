@@ -2,12 +2,14 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/brain_client.dart';
 import '../network/managed_network.dart';
+import '../security/local_auth_gate.dart';
 
 final class CommanderController extends ChangeNotifier {
-  CommanderController(this._client, this._managedNetwork);
+  CommanderController(this._client, this._managedNetwork, this._localAuth);
 
   final BrainClient _client;
   final ManagedNetworkPlatform _managedNetwork;
+  final LocalAuthGate _localAuth;
 
   bool loading = true;
   bool submitting = false;
@@ -119,7 +121,18 @@ final class CommanderController extends ChangeNotifier {
     }
   }
 
+  /// Demands a fresh user-presence proof immediately before a privileged
+  /// action. Anything other than a successful check throws, so no caller can
+  /// proceed by ignoring a return value.
+  Future<void> _stepUp(PrivilegedAction action) async {
+    final outcome = await _localAuth.authenticate(action);
+    if (outcome != LocalAuthOutcome.authenticated) {
+      throw localAuthRefusal(action, outcome);
+    }
+  }
+
   Future<CommanderJob> submitJob(JobRequest request) async {
+    await _stepUp(PrivilegedAction.submitJob);
     submitting = true;
     notifyListeners();
     try {
@@ -136,12 +149,21 @@ final class CommanderController extends ChangeNotifier {
   }
 
   Future<BrainProfile> pair(PairingRequest request) async {
+    await _stepUp(PrivilegedAction.pairBrain);
     final paired = await _client.pair(request);
     await load();
     return paired;
   }
 
   Future<void> forgetPairing() async {
+    try {
+      await _stepUp(PrivilegedAction.revokeAccess);
+    } catch (caught) {
+      error = caught;
+      loading = false;
+      notifyListeners();
+      return;
+    }
     loading = true;
     error = null;
     notifyListeners();

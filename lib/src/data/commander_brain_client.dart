@@ -5,6 +5,7 @@ import 'dart:math';
 
 import '../domain/brain_client.dart';
 import '../security/commander_auth.dart';
+import '../security/local_auth_gate.dart';
 import '../security/secure_credential_vault.dart';
 import 'fixture_brain_client.dart';
 
@@ -23,36 +24,59 @@ final class CommanderTransportException implements Exception {
 final class CommanderBrainClient implements BrainClient {
   CommanderBrainClient({
     required SecureCredentialVault vault,
+    required LocalAuthGate localAuth,
     FixtureBrainClient? fixture,
     CommanderDeviceSigner? signer,
     HttpClient? httpClient,
   }) : _vault = vault,
+       _localAuth = localAuth,
        _fixture = fixture ?? FixtureBrainClient(),
        _signer = signer ?? CommanderDeviceSigner(),
        _http =
            httpClient ??
-           (HttpClient()..connectionTimeout = const Duration(seconds: 8)) {
-    _credentialFuture = _initialCredential();
-  }
+           (HttpClient()..connectionTimeout = const Duration(seconds: 8));
 
   static const _requestTimeout = Duration(seconds: 20);
   static const _maxResponseBytes = 1024 * 1024;
 
   final SecureCredentialVault _vault;
+  final LocalAuthGate _localAuth;
   final FixtureBrainClient _fixture;
   final CommanderDeviceSigner _signer;
   final HttpClient _http;
-  late Future<DeviceCredential?> _credentialFuture;
+  Future<DeviceCredential?>? _credentialFuture;
   List<ModelCapability> _catalog = const [];
 
+  /// Reads the stored credential and activates it for this process only after
+  /// the operator proves presence to the operating system.
+  ///
+  /// The prompt is deliberately not raised when no credential is stored:
+  /// fixture mode carries no operator authority, so there is nothing to gate.
   Future<DeviceCredential?> _initialCredential() async {
     if (await _vault.protection() != VaultProtection.operatingSystem) {
       return null;
     }
-    return _vault.readActive();
+    final credential = await _vault.readActive();
+    if (credential == null) return null;
+    final outcome = await _localAuth.authenticate(
+      PrivilegedAction.unlockSession,
+    );
+    if (outcome != LocalAuthOutcome.authenticated) {
+      throw localAuthRefusal(PrivilegedAction.unlockSession, outcome);
+    }
+    return credential;
   }
 
-  Future<DeviceCredential?> _credential() => _credentialFuture;
+  /// Resolved lazily so the unlock prompt is raised on first data access —
+  /// after the Flutter view exists — rather than during construction.
+  Future<DeviceCredential?> _credential() {
+    return _credentialFuture ??= _initialCredential().onError((error, stack) {
+      // Let a refused or failed unlock be retried instead of poisoning the
+      // client for the rest of the process lifetime.
+      _credentialFuture = null;
+      Error.throwWithStackTrace(error!, stack);
+    });
+  }
 
   Future<Map<String, dynamic>> _request({
     required Uri origin,
