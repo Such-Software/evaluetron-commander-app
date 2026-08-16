@@ -155,14 +155,16 @@ final class CommanderController extends ChangeNotifier {
     return paired;
   }
 
-  Future<void> forgetPairing() async {
+  /// Revokes and removes this Commander.
+  ///
+  /// Returns the refusal when local authentication did not succeed, so the
+  /// caller can show it where the operator asked, instead of dropping the
+  /// whole shell into its failure state over a cancelled prompt.
+  Future<LocalAuthRequiredException?> forgetPairing() async {
     try {
       await _stepUp(PrivilegedAction.revokeAccess);
-    } catch (caught) {
-      error = caught;
-      loading = false;
-      notifyListeners();
-      return;
+    } on LocalAuthRequiredException catch (refusal) {
+      return refusal;
     }
     loading = true;
     error = null;
@@ -173,8 +175,9 @@ final class CommanderController extends ChangeNotifier {
       error = caught;
       loading = false;
       notifyListeners();
-      return;
+      return null;
     }
     await load();
+    return null;
   }
 }

@@ -6,6 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../brand.dart';
 import '../domain/brain_client.dart';
 import '../network/managed_network.dart';
+import '../security/local_auth_gate.dart';
 import '../state/commander_controller.dart';
 
 const _destinations = [
@@ -344,7 +345,7 @@ final class _FailureView extends StatelessWidget {
   });
   final Object error;
   final VoidCallback retry;
-  final VoidCallback resetPairing;
+  final Future<LocalAuthRequiredException?> Function() resetPairing;
 
   @override
   Widget build(BuildContext context) {
@@ -375,7 +376,13 @@ final class _FailureView extends StatelessWidget {
                   runSpacing: 12,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: resetPairing,
+                      onPressed: () async {
+                        final refusal = await resetPairing();
+                        if (refusal == null || !context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(refusal.message)),
+                        );
+                      },
                       icon: const Icon(Icons.phonelink_erase),
                       label: const Text('Remove paired Brain'),
                     ),
@@ -1594,8 +1601,13 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
   }
 
   Future<void> _forgetPairing() async {
-    await widget.controller.forgetPairing();
-    if (!mounted || widget.controller.error != null) return;
+    final refusal = await widget.controller.forgetPairing();
+    if (!mounted) return;
+    if (refusal != null) {
+      setState(() => _message = refusal.message);
+      return;
+    }
+    if (widget.controller.error != null) return;
     Navigator.pop(context);
   }
 

@@ -98,12 +98,14 @@ void main() {
         final gate = FakeLocalAuthGate.rejecting();
         final controller = _controller(client, gate);
 
-        await controller.forgetPairing();
+        final refusal = await controller.forgetPairing();
 
         expect(gate.requested, [PrivilegedAction.revokeAccess]);
         // The legitimate operator still has their pairing.
         expect(client.paired, isTrue);
-        expect(controller.error, isA<LocalAuthRequiredException>());
+        expect(refusal, isA<LocalAuthRequiredException>());
+        // A cancelled prompt must not drop the shell into its failure state.
+        expect(controller.error, isNull);
       },
     );
 
@@ -236,6 +238,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Commander is locked'), findsOneWidget);
     expect(find.text('Active jobs'), findsNothing);
+  });
+
+  testWidgets('a cancelled revoke is refused in place, not app-wide', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final client = _PairedBrainClient()..paired = true;
+    await tester.pumpWidget(
+      CommanderApp(client: client, localAuth: FakeLocalAuthGate.rejecting()),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Open Brain profile'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Revoke and remove'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('requires device authentication'),
+      findsOneWidget,
+    );
+    expect(client.paired, isTrue);
+    // The shell is intact behind the dialog.
+    expect(find.text('Commander could not load'), findsNothing);
   });
 
   testWidgets('fixture sessions are not re-locked', (tester) async {
