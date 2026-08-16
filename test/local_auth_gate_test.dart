@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_local_auth_gate.dart';
+import 'support/memory_pin_store.dart';
 import 'support/memory_secure_storage.dart';
 
 final _credential = DeviceCredential(
@@ -125,7 +126,11 @@ void main() {
         final vault = PlatformSecureCredentialVault(storage);
         await vault.write(_credential);
         final gate = FakeLocalAuthGate.unavailable();
-        final client = CommanderBrainClient(vault: vault, localAuth: gate);
+        final client = CommanderBrainClient(
+          vault: vault,
+          localAuth: gate,
+          pins: MemoryBrainCertificatePinStore(),
+        );
 
         await expectLater(
           client.getProfile(),
@@ -142,7 +147,11 @@ void main() {
         final vault = PlatformSecureCredentialVault(storage);
         await vault.write(_credential);
         final gate = FakeLocalAuthGate.rejecting();
-        final client = CommanderBrainClient(vault: vault, localAuth: gate);
+        final client = CommanderBrainClient(
+          vault: vault,
+          localAuth: gate,
+          pins: MemoryBrainCertificatePinStore(),
+        );
 
         await expectLater(client.getProfile(), throwsA(isA<Exception>()));
         await expectLater(client.getProfile(), throwsA(isA<Exception>()));
@@ -159,7 +168,11 @@ void main() {
       () async {
         final vault = PlatformSecureCredentialVault(MemorySecureStorage());
         final gate = FakeLocalAuthGate();
-        final client = CommanderBrainClient(vault: vault, localAuth: gate);
+        final client = CommanderBrainClient(
+          vault: vault,
+          localAuth: gate,
+          pins: MemoryBrainCertificatePinStore(),
+        );
 
         expect((await client.getProfile()).mode, ConnectionMode.fixture);
         expect(gate.requested, isEmpty);

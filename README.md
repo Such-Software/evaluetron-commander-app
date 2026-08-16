@@ -71,6 +71,55 @@ Known residual gaps, not closed by this gate:
   code execution, a rooted or jailbroken device, or a debug build from reading
   the credential out of the platform store directly.
 
+### Brain certificate pinning
+
+The Commander protocol signs client→server only; nothing in a Brain response
+is authenticated. Without pinning, anyone holding a certificate from any CA
+the device trusts — including one pushed by enterprise MDM — could fabricate
+the entire fleet view, hide activity, and swallow job submissions. The
+identity check against locally stored values proves nothing, because an
+interceptor simply echoes those values back.
+
+Commander pins the Brain's TLS certificate, recorded at pairing:
+
+- Requests run on an `HttpClient` built from
+  `SecurityContext(withTrustedRoots: false)` carrying **only** the pinned
+  certificates. A peer that cannot present one is rejected *during the
+  handshake*, before any request byte is sent. Hostname verification still
+  applies.
+- `badCertificateCallback` is never set. It only fires after validation has
+  already failed, so it cannot implement pinning; returning `true` there
+  would be a TLS bypass.
+- **Rotation.** A bare leaf pin would break at every renewal — roughly every
+  90 days for an ACME issuer. When a pinned handshake fails, Commander
+  re-inspects the peer over `SecureSocket`, which completes a handshake under
+  ordinary public-CA validation and yields the leaf certificate **without
+  sending any application data**. The new certificate is adopted only if it
+  is publicly valid *and* carries the same subject and issuer as the one
+  recorded at pairing. Up to three certificates stay trusted at once, which
+  keeps a window open across a changeover and tolerates a load balancer that
+  serves more than one certificate for the same name.
+- **On mismatch it fails closed** with a distinct error naming the old and
+  new issuer, and keeps the credential and the pin. The recovery path is to
+  pair again from the protected operator console, which requires console
+  access. Commander never auto-wipes a credential over a certificate change,
+  and never offers a one-tap "trust it anyway".
+
+Residual gaps, stated plainly:
+
+- **Pairing is trust-on-first-use.** The pin can only record whoever answered
+  at pairing time. An interceptor already in place during pairing is pinned.
+  Out-of-band verification of the first connection is not implemented.
+- **Same-issuer forgery is not stopped.** An attacker who can obtain a
+  certificate for the same host from the same issuer — via DNS or BGP control
+  over an ACME challenge, or by compromising that CA — passes the continuity
+  rule. Closing this needs a pin on the issuing CA, which **cannot be built
+  from Dart's API**: `SecureSocket.peerCertificate` and
+  `HttpClientResponse.certificate` expose the leaf only, never the chain, so
+  the intermediate's bytes are never available to persist as an anchor.
+- The pin is stored in the operating-system secure store, so it inherits
+  exactly the protections described above and no more.
+
 `BrainClient` is the transport-independent application contract.
 `FixtureBrainClient` is deterministic local data for development and tests.
 `CommanderBrainClient` switches from fixture data only after authenticated

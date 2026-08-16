@@ -4,18 +4,25 @@ import 'dart:io';
 import 'dart:math';
 
 import '../domain/brain_client.dart';
+import '../security/brain_certificate_pin.dart';
 import '../security/commander_auth.dart';
 import '../security/local_auth_gate.dart';
 import '../security/secure_credential_vault.dart';
+import 'brain_tls_transport.dart';
 import 'fixture_brain_client.dart';
 
 final class CommanderTransportException implements Exception {
   const CommanderTransportException(
     this.message, {
     this.authorizationRejected = false,
+    this.certificateChanged = false,
   });
   final String message;
   final bool authorizationRejected;
+
+  /// The Brain's TLS identity no longer matches what was pinned at pairing.
+  /// Callers must not react by deleting the credential.
+  final bool certificateChanged;
 
   @override
   String toString() => message;
@@ -25,25 +32,23 @@ final class CommanderBrainClient implements BrainClient {
   CommanderBrainClient({
     required SecureCredentialVault vault,
     required LocalAuthGate localAuth,
+    required BrainCertificatePinStore pins,
     FixtureBrainClient? fixture,
     CommanderDeviceSigner? signer,
-    HttpClient? httpClient,
+    BrainTlsTransport? transport,
   }) : _vault = vault,
        _localAuth = localAuth,
+       _pins = pins,
        _fixture = fixture ?? FixtureBrainClient(),
        _signer = signer ?? CommanderDeviceSigner(),
-       _http =
-           httpClient ??
-           (HttpClient()..connectionTimeout = const Duration(seconds: 8));
-
-  static const _requestTimeout = Duration(seconds: 20);
-  static const _maxResponseBytes = 1024 * 1024;
+       _transport = transport ?? PlatformBrainTlsTransport();
 
   final SecureCredentialVault _vault;
   final LocalAuthGate _localAuth;
+  final BrainCertificatePinStore _pins;
   final FixtureBrainClient _fixture;
   final CommanderDeviceSigner _signer;
-  final HttpClient _http;
+  final BrainTlsTransport _transport;
   Future<DeviceCredential?>? _credentialFuture;
   List<ModelCapability> _catalog = const [];
 
@@ -78,6 +83,13 @@ final class CommanderBrainClient implements BrainClient {
     });
   }
 
+  /// Sends a request under the trust anchors pinned for [origin] at pairing.
+  ///
+  /// A failed pinned handshake is not fatal on its own — a Brain certificate
+  /// legitimately changes at every renewal. The rotation path re-establishes
+  /// the peer's identity over a handshake that carries no application data,
+  /// and only then re-sends. A signed request, and any job payload inside it,
+  /// is therefore never handed to a peer whose identity was not checked first.
   Future<Map<String, dynamic>> _request({
     required Uri origin,
     required String method,
@@ -91,60 +103,141 @@ final class CommanderBrainClient implements BrainClient {
         'Commander requires an HTTPS Brain origin.',
       );
     }
-    final target = origin.resolve(path);
-    final request = await _http
-        .openUrl(method, target)
-        .timeout(_requestTimeout);
-    request.followRedirects = false;
-    request.maxRedirects = 0;
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    if (body.isNotEmpty) {
-      request.headers.set(
-        HttpHeaders.contentTypeHeader,
-        'application/json; charset=utf-8',
-      );
-      request.contentLength = body.length;
-    }
-    if (enrollmentToken != null) {
-      request.headers.set(
-        HttpHeaders.authorizationHeader,
-        'Bearer $enrollmentToken',
-      );
-    }
-    if (credential != null) {
-      final headers = await _signer.signedHeaders(
-        credential: credential,
+    final pin = await _pins.read(origin);
+    try {
+      return await _send(
+        origin: origin,
         method: method,
         path: path,
         body: body,
+        credential: credential,
+        enrollmentToken: enrollmentToken,
+        trustBundle: pin?.trustBundle,
       );
-      headers.forEach(request.headers.set);
-    }
-    if (body.isNotEmpty) request.add(body);
-    final response = await request.close().timeout(_requestTimeout);
-    if (response.isRedirect) {
-      await response.drain<void>();
-      throw const CommanderTransportException(
-        'Brain redirects are not accepted.',
-      );
-    }
-    final bytes = <int>[];
-    await for (final chunk in response.timeout(_requestTimeout)) {
-      if (bytes.length + chunk.length > _maxResponseBytes) {
-        throw const CommanderTransportException(
-          'Brain response exceeded the safety limit.',
+    } on BrainHandshakeException catch (error) {
+      if (pin == null) {
+        // Nothing pinned yet: this is an ordinary public-CA validation
+        // failure, reported as such.
+        throw CommanderTransportException(
+          'The Brain\'s TLS certificate could not be validated. $error',
         );
       }
-      bytes.addAll(chunk);
+      final rotated = await _rotatePin(origin, pin);
+      try {
+        return await _send(
+          origin: origin,
+          method: method,
+          path: path,
+          body: body,
+          credential: credential,
+          enrollmentToken: enrollmentToken,
+          trustBundle: rotated.trustBundle,
+        );
+      } on BrainHandshakeException {
+        throw _certificateChanged(origin, pin, null);
+      }
     }
-    if (response.headers.contentType?.mimeType != 'application/json') {
+  }
+
+  /// Re-checks who is answering for [origin] after a pinned handshake failed.
+  ///
+  /// The probe uses ordinary public-CA validation, so a renewal is only
+  /// adopted when it is both publicly valid *and* continuous with the
+  /// certificate recorded at pairing.
+  Future<BrainCertificatePin> _rotatePin(
+    Uri origin,
+    BrainCertificatePin pin,
+  ) async {
+    final ObservedCertificate observed;
+    try {
+      observed = await _transport.peerCertificate(origin);
+    } on BrainHandshakeException {
+      throw _certificateChanged(origin, pin, null);
+    }
+    if (pin.contains(observed.fingerprint) || !pin.allowsRotationTo(observed)) {
+      throw _certificateChanged(origin, pin, observed);
+    }
+    final rotated = pin.rotatedWith(observed);
+    await _pins.write(origin, rotated);
+    return rotated;
+  }
+
+  /// Fail-closed refusal. Deliberately does not clear the pin or the
+  /// credential: an operator who is being attacked must not have their own
+  /// access destroyed as a side effect.
+  CommanderTransportException _certificateChanged(
+    Uri origin,
+    BrainCertificatePin pin,
+    ObservedCertificate? observed,
+  ) {
+    if (observed != null && pin.contains(observed.fingerprint)) {
+      return CommanderTransportException(
+        'The pinned TLS certificate for ${origin.host} is no longer usable — '
+        'it expired on ${observed.notAfter.toUtc()}. Renew the Brain\'s '
+        'certificate, then pair Commander again from the operator console.',
+        certificateChanged: true,
+      );
+    }
+    final seen = observed == null
+        ? 'Its identity could not be re-established.'
+        : 'It is now issued by "${observed.issuer}" for "${observed.subject}", '
+              'not by "${pin.issuer}" for "${pin.subject}".';
+    return CommanderTransportException(
+      'The TLS certificate for ${origin.host} changed and Commander refused '
+      'to connect. $seen This is what an intercepting proxy looks like. '
+      'Your pairing has been kept. If the Brain\'s certificate authority '
+      'really did change, pair Commander again from the protected operator '
+      'console to trust the new certificate.',
+      certificateChanged: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> _send({
+    required Uri origin,
+    required String method,
+    required String path,
+    required List<int> body,
+    required String? trustBundle,
+    DeviceCredential? credential,
+    String? enrollmentToken,
+  }) async {
+    final headers = <String, String>{
+      HttpHeaders.acceptHeader: 'application/json',
+      if (body.isNotEmpty)
+        HttpHeaders.contentTypeHeader: 'application/json; charset=utf-8',
+      if (enrollmentToken != null)
+        HttpHeaders.authorizationHeader: 'Bearer $enrollmentToken',
+    };
+    if (credential != null) {
+      headers.addAll(
+        await _signer.signedHeaders(
+          credential: credential,
+          method: method,
+          path: path,
+          body: body,
+        ),
+      );
+    }
+    final BrainResponse response;
+    try {
+      response = await _transport.send(
+        method: method,
+        url: origin.resolve(path),
+        headers: headers,
+        body: body,
+        trustBundle: trustBundle,
+      );
+    } on BrainNetworkException catch (error) {
+      throw CommanderTransportException('$error');
+    }
+    if (response.contentType != 'application/json') {
       throw const CommanderTransportException(
         'Brain returned an unexpected content type.',
       );
     }
     Map<String, dynamic> decoded;
     try {
-      final value = jsonDecode(utf8.decode(bytes));
+      final value = jsonDecode(utf8.decode(response.body));
       if (value is! Map<String, dynamic>) throw const FormatException();
       decoded = value;
     } on Object {
@@ -352,9 +445,13 @@ final class CommanderBrainClient implements BrainClient {
         credential: credential,
       );
     } on CommanderTransportException catch (error) {
-      if (!error.authorizationRejected) rethrow;
+      // A Brain that rejects us, or one we refuse to talk to because its
+      // certificate changed, can never be reached again. Local removal has to
+      // stay possible in both cases or the operator is stranded.
+      if (!error.authorizationRejected && !error.certificateChanged) rethrow;
     }
     await _vault.remove(credential.brainOrigin);
+    await _pins.remove(credential.brainOrigin);
     _catalog = const [];
     _credentialFuture = Future.value(null);
   }
@@ -453,6 +550,22 @@ final class CommanderBrainClient implements BrainClient {
         'Operating-system secure credential storage is unavailable.',
       );
     }
+    // Record who answers for this origin before the one-time enrollment token
+    // is sent, so even the pairing exchange runs over a pinned handshake.
+    // Pairing is trust-on-first-use by nature: this can only record whoever
+    // answered now. It is also the documented recovery path, so a fresh
+    // pairing always replaces any earlier pin for the origin.
+    final ObservedCertificate observed;
+    try {
+      observed = await _transport.peerCertificate(enrollment.brainOrigin);
+    } on BrainHandshakeException catch (error) {
+      throw CommanderTransportException(
+        'The Brain\'s TLS certificate could not be validated. $error',
+      );
+    } on BrainNetworkException catch (error) {
+      throw CommanderTransportException('$error');
+    }
+    await _pins.write(enrollment.brainOrigin, BrainCertificatePin.of(observed));
     final keyPair = await _signer.createKeyPair();
     final body = utf8.encode(jsonEncode({'publicKey': keyPair.publicKey}));
     final response = await _request(
