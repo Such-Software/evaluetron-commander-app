@@ -91,7 +91,7 @@ final class CommanderBrainClient implements BrainClient {
     final outcome = await _localAuth.authenticate(
       PrivilegedAction.unlockSession,
     );
-    if (outcome != LocalAuthOutcome.authenticated) {
+    if (!localAuthPermits(outcome)) {
       throw localAuthRefusal(PrivilegedAction.unlockSession, outcome);
     }
     return credential;

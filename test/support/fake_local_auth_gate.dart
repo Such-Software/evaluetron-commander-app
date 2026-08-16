@@ -10,9 +10,19 @@ final class FakeLocalAuthGate implements LocalAuthGate {
     this.enrolled = true,
   });
 
-  /// A gate that always fails closed, as an unenrolled device would.
-  factory FakeLocalAuthGate.unavailable() =>
-      FakeLocalAuthGate(outcome: LocalAuthOutcome.unavailable, enrolled: false);
+  /// A device that could prove presence but has no screen lock enrolled.
+  /// Fails closed: the operator can fix this.
+  factory FakeLocalAuthGate.notEnrolled() => FakeLocalAuthGate(
+    outcome: LocalAuthOutcome.notEnrolled,
+    enrolled: false,
+  );
+
+  /// A platform with no local authentication implementation at all, such as
+  /// Linux desktop. Permits the action and reports the session unprotected.
+  factory FakeLocalAuthGate.unsupportedPlatform() => FakeLocalAuthGate(
+    outcome: LocalAuthOutcome.unsupportedPlatform,
+    enrolled: false,
+  );
 
   /// A gate where the operator cancels or fails the prompt.
   factory FakeLocalAuthGate.rejecting() =>

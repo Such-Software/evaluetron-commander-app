@@ -126,7 +126,7 @@ final class CommanderController extends ChangeNotifier {
   /// proceed by ignoring a return value.
   Future<void> _stepUp(PrivilegedAction action) async {
     final outcome = await _localAuth.authenticate(action);
-    if (outcome != LocalAuthOutcome.authenticated) {
+    if (!localAuthPermits(outcome)) {
       throw localAuthRefusal(action, outcome);
     }
   }

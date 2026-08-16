@@ -37,6 +37,10 @@ final class _CommanderLockGateState extends State<CommanderLockGate>
     with WidgetsBindingObserver {
   bool _locked = false;
   bool _authenticating = false;
+  /// True where the platform ships no local authentication at all, so the
+  /// session is protected only by the desktop login. Surfaced rather than
+  /// silently assumed, because the operator cannot fix it by enrolling.
+  bool _unprotected = false;
   String? _refusal;
 
   @override
@@ -88,7 +92,8 @@ final class _CommanderLockGateState extends State<CommanderLockGate>
       );
       if (!mounted) return;
       setState(() {
-        _locked = outcome != LocalAuthOutcome.authenticated;
+        _locked = !localAuthPermits(outcome);
+        _unprotected = outcome == LocalAuthOutcome.unsupportedPlatform;
         _refusal = _locked
             ? localAuthRefusal(PrivilegedAction.unlockSession, outcome).message
             : null;
@@ -100,11 +105,46 @@ final class _CommanderLockGateState extends State<CommanderLockGate>
 
   @override
   Widget build(BuildContext context) {
-    if (!_locked) return widget.child;
-    return _LockedScreen(
-      busy: _authenticating,
-      refusal: _refusal,
-      onUnlock: _unlock,
+    if (_locked) {
+      return _LockedScreen(
+        busy: _authenticating,
+        refusal: _refusal,
+        onUnlock: _unlock,
+      );
+    }
+    if (!_unprotected) return widget.child;
+    return Column(
+      children: [
+        Material(
+          color: Theme.of(context).colorScheme.errorContainer,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.lock_open_outlined,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'No device unlock on this platform. Anyone with this '
+                      'desktop session holds operator authority.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(child: widget.child),
+      ],
     );
   }
 }

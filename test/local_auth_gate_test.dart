@@ -52,7 +52,7 @@ void main() {
       'an unenrolled device fails closed rather than skipping the gate',
       () async {
         final client = _RecordingBrainClient();
-        final gate = FakeLocalAuthGate.unavailable();
+        final gate = FakeLocalAuthGate.notEnrolled();
 
         await expectLater(
           _controller(client, gate).submitJob(
@@ -63,12 +63,38 @@ void main() {
                 .having(
                   (e) => e.outcome,
                   'outcome',
-                  LocalAuthOutcome.unavailable,
+                  LocalAuthOutcome.notEnrolled,
                 )
                 .having((e) => e.message, 'message', contains('screen lock')),
           ),
         );
         expect(client.submitted, isEmpty);
+      },
+    );
+
+    test(
+      'a platform with no authenticator stays usable instead of bricking',
+      () async {
+        // Linux desktop ships no local_auth implementation, so no operator
+        // action can produce a presence proof. Failing closed there would not
+        // add security -- the desktop login is the barrier, as it was before
+        // this gate existed -- it would only make a supported target unusable.
+        // The session is reported unprotected instead.
+        final client = _RecordingBrainClient();
+        final gate = FakeLocalAuthGate.unsupportedPlatform();
+
+        await _controller(client, gate).submitJob(
+          const JobRequest(capabilityId: 'llm-grounded', input: 'hello'),
+        );
+
+        expect(gate.requested, [PrivilegedAction.submitJob]);
+        expect(client.submitted, hasLength(1));
+        expect(
+          localAuthPermits(LocalAuthOutcome.unsupportedPlatform),
+          isTrue,
+        );
+        expect(localAuthPermits(LocalAuthOutcome.notEnrolled), isFalse);
+        expect(localAuthPermits(LocalAuthOutcome.rejected), isFalse);
       },
     );
 
@@ -127,7 +153,7 @@ void main() {
         final storage = MemorySecureStorage();
         final vault = PlatformSecureCredentialVault(storage);
         await vault.write(_credential);
-        final gate = FakeLocalAuthGate.unavailable();
+        final gate = FakeLocalAuthGate.notEnrolled();
         final client = CommanderBrainClient(
           vault: vault,
           localAuth: gate,
@@ -221,7 +247,7 @@ void main() {
     await tester.pumpWidget(
       CommanderApp(
         client: _PairedBrainClient(),
-        localAuth: FakeLocalAuthGate.unavailable(),
+        localAuth: FakeLocalAuthGate.notEnrolled(),
       ),
     );
     await tester.pumpAndSettle();

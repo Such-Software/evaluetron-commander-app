@@ -46,11 +46,24 @@ points:
 The step-up checks live in the controller rather than in widgets so no UI path
 can reach a privileged action without one.
 
-The gate **fails closed**. A device with no enrolled authenticator, or a
-platform with no `local_auth` implementation, yields
-`LocalAuthOutcome.unavailable`, which refuses the action and says so. It is
-never treated as success. A paired session on such a device cannot be
-unlocked; the deliberate remedy is to enrol a device screen lock.
+The gate distinguishes two ways a presence proof can be missing, because they
+have different remedies.
+
+`LocalAuthOutcome.notEnrolled` means the device could prove presence but the
+operator has not set a screen lock or biometric. The gate **fails closed** and
+says so; the remedy is to enrol one.
+
+`LocalAuthOutcome.unsupportedPlatform` means the platform ships no `local_auth`
+implementation at all — Linux desktop today. No operator action can produce a
+proof there, so refusing would not add security: the desktop session login is
+the barrier, exactly as it was before this gate existed. It would only make a
+supported target unusable. The action proceeds and the shell shows a persistent
+banner that the session is unprotected, so the reduced protection is visible
+rather than assumed. Treat a Linux Commander as being only as protected as the
+desktop login, and prefer a phone for operator authority.
+
+A cancelled or failed prompt is always a refusal. Neither missing-proof case is
+ever reported as authenticated.
 
 Fixture mode is intentionally not gated: it carries no operator authority, and
 prompting there would train operators to dismiss the prompt reflexively.
