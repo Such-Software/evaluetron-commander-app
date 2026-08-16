@@ -46,6 +46,19 @@ abstract interface class SecureCredentialVault {
   Future<DeviceCredential?> read(Uri brainOrigin);
   Future<DeviceCredential?> readActive();
   Future<void> remove(Uri brainOrigin);
+
+  /// Every Brain origin a credential is stored for, oldest pairing first.
+  ///
+  /// Without this the store cannot be enumerated at all — credential keys are
+  /// hashed — so a second pairing would leave the first one on the device with
+  /// no way for the operator to see it, switch back to it, or remove it.
+  Future<List<Uri>> origins();
+
+  /// The origin whose credential [readActive] returns.
+  Future<Uri?> activeOrigin();
+
+  /// Makes the credential stored for [brainOrigin] the active one.
+  Future<void> activate(Uri brainOrigin);
 }
 
 final class UnavailableCredentialVault implements SecureCredentialVault {
@@ -71,6 +84,15 @@ final class UnavailableCredentialVault implements SecureCredentialVault {
 
   @override
   Future<void> write(DeviceCredential credential) async => _unsupported();
+
+  @override
+  Future<List<Uri>> origins() async => _unsupported();
+
+  @override
+  Future<Uri?> activeOrigin() async => _unsupported();
+
+  @override
+  Future<void> activate(Uri brainOrigin) async => _unsupported();
 }
 
 abstract interface class SecureStorageAdapter {
@@ -109,6 +131,7 @@ final class PlatformSecureCredentialVault implements SecureCredentialVault {
   PlatformSecureCredentialVault(this._storage);
 
   static const _activeKey = 'commander.active-origin.v1';
+  static const _originsKey = 'commander.origins.v1';
   static final _sha256 = Sha256();
   final SecureStorageAdapter _storage;
 
@@ -164,6 +187,10 @@ final class PlatformSecureCredentialVault implements SecureCredentialVault {
       'scopes': credential.scopes.toList()..sort(),
     });
     await _storage.write(await _credentialKey(credential.brainOrigin), value);
+    final known = await origins();
+    if (!known.contains(credential.brainOrigin)) {
+      await _writeIndex([...known, credential.brainOrigin]);
+    }
     await _storage.write(_activeKey, credential.brainOrigin.toString());
   }
 
@@ -195,23 +222,85 @@ final class PlatformSecureCredentialVault implements SecureCredentialVault {
   @override
   Future<DeviceCredential?> readActive() async {
     _requireNativeSecureStore();
-    final value = await _storage.read(_activeKey);
-    if (value == null) return null;
-    final origin = Uri.tryParse(value);
-    if (origin == null) {
-      throw const FormatException('Stored Commander origin is invalid.');
-    }
+    final origin = await _readActiveOrigin();
+    if (origin == null) return null;
     return read(origin);
+  }
+
+  @override
+  Future<List<Uri>> origins() async {
+    _requireNativeSecureStore();
+    final indexed = <Uri>[
+      for (final value in await _readIndex()) ?Uri.tryParse(value),
+    ];
+    // A device paired before this index existed still has an active origin,
+    // and losing it here would hide a credential that is very much present.
+    final active = await _readActiveOrigin();
+    if (active != null && !indexed.contains(active)) indexed.insert(0, active);
+    return List.unmodifiable(indexed);
+  }
+
+  @override
+  Future<Uri?> activeOrigin() async {
+    _requireNativeSecureStore();
+    return _readActiveOrigin();
+  }
+
+  @override
+  Future<void> activate(Uri brainOrigin) async {
+    _requireNativeSecureStore();
+    if (await read(brainOrigin) == null) {
+      throw StateError('No Commander credential is stored for $brainOrigin.');
+    }
+    await _storage.write(_activeKey, brainOrigin.toString());
   }
 
   @override
   Future<void> remove(Uri brainOrigin) async {
     _requireNativeSecureStore();
     await _storage.delete(await _credentialKey(brainOrigin));
-    if (await _storage.read(_activeKey) == brainOrigin.toString()) {
+    final remaining = (await origins())
+        .where((origin) => origin != brainOrigin)
+        .toList(growable: false);
+    await _writeIndex(remaining);
+    if (await _readActiveOrigin() != brainOrigin) return;
+    // A stored credential with nothing pointing at it would be unreachable,
+    // so removing the active pairing promotes the most recent survivor.
+    if (remaining.isEmpty) {
       await _storage.delete(_activeKey);
+    } else {
+      await _storage.write(_activeKey, remaining.last.toString());
     }
   }
+
+  Future<Uri?> _readActiveOrigin() async {
+    final value = await _storage.read(_activeKey);
+    if (value == null) return null;
+    final origin = Uri.tryParse(value);
+    if (origin == null) {
+      throw const FormatException('Stored Commander origin is invalid.');
+    }
+    return origin;
+  }
+
+  Future<List<String>> _readIndex() async {
+    final value = await _storage.read(_originsKey);
+    if (value == null) return const [];
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is! List<dynamic> || decoded.any((item) => item is! String)) {
+        throw const FormatException();
+      }
+      return decoded.cast<String>();
+    } on Object {
+      throw const FormatException('Stored Commander origin list is invalid.');
+    }
+  }
+
+  Future<void> _writeIndex(List<Uri> origins) => _storage.write(
+    _originsKey,
+    jsonEncode([for (final origin in origins) origin.toString()]),
+  );
 
   static void _validate(DeviceCredential value) {
     if (value.brainOrigin.scheme != 'https' ||

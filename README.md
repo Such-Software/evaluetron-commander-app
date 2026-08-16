@@ -28,11 +28,26 @@ the `SecureCredentialVault` abstraction backed by Keychain, Android Keystore,
 or an equivalent operating-system store. It must never be put in
 SharedPreferences, ordinary files, logs, analytics, or crash reports.
 
+### Several paired Brains
+
+Commander keeps one device identity per Brain origin and can hold more than
+one. Pairing a second Brain therefore does not discard the first: it stays
+valid on its own Brain, so it is listed in the Brain profile dialog with the
+device id it carries, and can be switched to or removed there. Removing a
+pairing revokes it on that Brain first, then deletes the local seed.
+
+Pairing an origin that is *already* paired is different: the new key replaces
+the old one, which would strand the device row the old key belonged to, so the
+replaced identity is revoked on a best-effort basis before it is overwritten.
+That revocation cannot be allowed to fail the pairing, because pairing again is
+the documented recovery path after a Brain certificate change — the one case
+where the old credential can no longer be used to talk to that Brain at all.
+
 ### Local authentication gate
 
 Commander holds operator authority over a whole fleet, so the operating-system
 lock screen is not accepted as the only barrier. `LocalAuthGate` adds a
-device user-presence check (biometric, PIN, pattern, or password) at five
+device user-presence check (biometric, PIN, pattern, or password) at six
 points:
 
 | Point | Where it is enforced |
@@ -41,7 +56,8 @@ points:
 | Returning from the background | `CommanderLockGate` |
 | Submitting a job | `CommanderController.submitJob` |
 | Pairing a Brain | `CommanderController.pair` |
-| Revoking this Commander | `CommanderController.forgetPairing` |
+| Switching to another paired Brain | `CommanderController.selectPairedBrain` |
+| Revoking a Commander pairing | `CommanderController.forgetPairing`, `CommanderController.removePairing` |
 
 The step-up checks live in the controller rather than in widgets so no UI path
 can reach a privileged action without one.

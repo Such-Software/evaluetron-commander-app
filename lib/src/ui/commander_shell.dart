@@ -1400,6 +1400,7 @@ final class BrainProfileDialog extends StatefulWidget {
 final class _BrainProfileDialogState extends State<BrainProfileDialog> {
   final _enrollment = TextEditingController();
   String? _message;
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -1409,6 +1410,15 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Listens, because switching or removing a pairing changes the very list
+    // this dialog is showing.
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => _dialog(context),
+    );
+  }
+
+  Widget _dialog(BuildContext context) {
     final profile = widget.controller.profile!;
     return AlertDialog(
       title: const Row(
@@ -1500,6 +1510,39 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
                   ],
                 ),
               ),
+              if (widget.controller.pairedBrains.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Text(
+                  'Paired Brains',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Every pairing kept on this device is a separate identity on '
+                  'that Brain, and stays valid until it is removed here or '
+                  'revoked from that Brain\'s console.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                Card(
+                  child: Column(
+                    children: [
+                      for (final (index, brain)
+                          in widget.controller.pairedBrains.indexed) ...[
+                        if (index != 0) const Divider(height: 1),
+                        _PairedBrainRow(
+                          brain: brain,
+                          busy: _busy,
+                          onUse: () => _select(brain),
+                          onRemove: () => _remove(brain),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               Text(
                 'Pair another Brain',
@@ -1611,10 +1654,97 @@ final class _BrainProfileDialogState extends State<BrainProfileDialog> {
     Navigator.pop(context);
   }
 
+  /// Commands a different Brain this device is already paired to.
+  Future<void> _select(PairedBrain brain) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      await widget.controller.selectPairedBrain(brain.origin);
+    } catch (error) {
+      if (mounted) setState(() => _message = '$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Revokes one pairing on its own Brain and deletes it from this device.
+  Future<void> _remove(PairedBrain brain) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final refusal = await widget.controller.removePairing(brain.origin);
+      if (!mounted) return;
+      setState(() => _message = refusal?.message ?? _removalFailure());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String? _removalFailure() {
+    final error = widget.controller.error;
+    return error == null ? null : '$error';
+  }
+
   Future<void> _showManagedNetwork() {
     return showDialog<void>(
       context: context,
       builder: (context) => ManagedNetworkDialog(controller: widget.controller),
+    );
+  }
+}
+
+final class _PairedBrainRow extends StatelessWidget {
+  const _PairedBrainRow({
+    required this.brain,
+    required this.busy,
+    required this.onUse,
+    required this.onRemove,
+  });
+
+  final PairedBrain brain;
+  final bool busy;
+  final VoidCallback onUse;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(
+        brain.active ? Icons.verified_user_outlined : Icons.dns_outlined,
+      ),
+      title: Text(brain.origin.host),
+      subtitle: Text(
+        '${brain.deviceLabel} · ${brain.deviceId}',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (brain.active)
+            const Chip(
+              label: Text('Active'),
+              visualDensity: VisualDensity.compact,
+            )
+          else
+            Tooltip(
+              message: 'Command ${brain.origin.host}',
+              child: TextButton(
+                onPressed: busy ? null : onUse,
+                child: const Text('Use'),
+              ),
+            ),
+          IconButton(
+            onPressed: busy ? null : onRemove,
+            tooltip: 'Remove ${brain.origin.host}',
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
+      ),
     );
   }
 }

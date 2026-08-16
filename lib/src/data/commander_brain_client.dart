@@ -521,26 +521,128 @@ final class CommanderBrainClient implements BrainClient {
 
   @override
   Future<void> forgetPairing() async {
-    final credential = await _credential();
-    if (credential == null) return;
-    try {
-      await _request(
-        origin: credential.brainOrigin,
-        method: 'POST',
-        path: '/api/commander/v1/revoke',
-        body: const [],
-        credential: credential,
-      );
-    } on CommanderTransportException catch (error) {
-      // A Brain that rejects us, or one we refuse to talk to because its
-      // certificate changed, can never be reached again. Local removal has to
-      // stay possible in both cases or the operator is stranded.
-      if (!error.authorizationRejected && !error.certificateChanged) rethrow;
+    if (await _vault.protection() != VaultProtection.operatingSystem) return;
+    final origin = await _vault.activeOrigin();
+    if (origin == null) return;
+    return removePairedBrain(origin);
+  }
+
+  @override
+  Future<List<PairedBrain>> pairedBrains() async {
+    if (await _vault.protection() != VaultProtection.operatingSystem) {
+      return const [];
     }
-    await _vault.remove(credential.brainOrigin);
-    await _pins.remove(credential.brainOrigin);
+    final active = await _vault.activeOrigin();
+    final brains = <PairedBrain>[];
+    for (final origin in await _vault.origins()) {
+      final DeviceCredential? credential;
+      try {
+        credential = await _vault.read(origin);
+      } on FormatException {
+        // An unreadable record cannot be signed with, switched to, or
+        // revoked from here. Hiding it keeps the list honest about what this
+        // device can actually command; the Brain's console still shows the
+        // device itself.
+        continue;
+      }
+      if (credential == null) continue;
+      brains.add(
+        PairedBrain(
+          origin: origin,
+          deviceId: credential.deviceId,
+          deviceLabel: credential.deviceLabel,
+          active: origin == active,
+        ),
+      );
+    }
+    return List.unmodifiable([
+      for (final brain in brains)
+        if (brain.active) brain,
+      for (final brain in brains)
+        if (!brain.active) brain,
+    ]);
+  }
+
+  @override
+  Future<BrainProfile> selectPairedBrain(Uri origin) async {
+    if (await _vault.protection() != VaultProtection.operatingSystem) {
+      throw const CommanderTransportException(
+        'Operating-system secure credential storage is unavailable.',
+      );
+    }
+    final credential = await _storedCredential(origin);
+    if (credential == null) {
+      throw CommanderTransportException(
+        'No Commander credential is stored for ${origin.host}.',
+      );
+    }
+    await _vault.activate(origin);
+    // The catalog and any held idempotency key belong to the Brain being left.
     _catalog = const [];
-    _credentialFuture = Future.value(null);
+    _inFlight.clear();
+    _credentialFuture = Future.value(credential);
+    return _profileFor(credential);
+  }
+
+  @override
+  Future<void> removePairedBrain(Uri origin) async {
+    final credential = await _storedCredential(origin);
+    if (credential != null) {
+      try {
+        await _revoke(credential);
+      } on CommanderTransportException catch (error) {
+        // A Brain that rejects us, or one we refuse to talk to because its
+        // certificate changed, can never be reached again. Local removal has
+        // to stay possible in both cases or the operator is stranded.
+        if (!error.authorizationRejected && !error.certificateChanged) rethrow;
+      }
+    }
+    await _forgetLocally(origin);
+  }
+
+  Future<Map<String, dynamic>> _revoke(DeviceCredential credential) => _request(
+    origin: credential.brainOrigin,
+    method: 'POST',
+    path: '/api/commander/v1/revoke',
+    body: const [],
+    credential: credential,
+  );
+
+  /// Drops every trace of [origin] from this device.
+  ///
+  /// The resolved credential is discarded rather than replaced with `null`:
+  /// another pairing may still be stored, and activating it has to go back
+  /// through the launch gate.
+  Future<void> _forgetLocally(Uri origin) async {
+    await _vault.remove(origin);
+    await _pins.remove(origin);
+    _catalog = const [];
+    _inFlight.clear();
+    _credentialFuture = null;
+  }
+
+  /// Reads the credential stored for [origin] behind a proof of user presence.
+  ///
+  /// Activating the credential at launch is what raises the unlock prompt, so
+  /// reaching past it to a *second* Brain's credential must not be a way
+  /// around the same check. When nothing is active there is no session unlock
+  /// to inherit, and one is demanded here instead.
+  Future<DeviceCredential?> _storedCredential(Uri origin) async {
+    if (await _vault.protection() != VaultProtection.operatingSystem) {
+      return null;
+    }
+    final active = await _credential();
+    if (active != null) {
+      return active.brainOrigin == origin ? active : _vault.read(origin);
+    }
+    if (await _vault.read(origin) == null) return null;
+    final outcome = await _localAuth.authenticate(
+      PrivilegedAction.unlockSession,
+    );
+    if (!localAuthPermits(outcome)) {
+      throw localAuthRefusal(PrivilegedAction.unlockSession, outcome);
+    }
+    return _vault.read(origin);
   }
 
   @override
@@ -690,9 +792,41 @@ final class CommanderBrainClient implements BrainClient {
       scopes: _strings(device['scopes']).toSet(),
     );
     final profile = await _profileFor(credential);
+    // Pairing an origin that is already paired replaces the credential this
+    // device holds for it, which strands the device row the old key belonged
+    // to. Retire it rather than leaving an active row nobody holds a key for.
+    // Best effort only: pairing again is the documented recovery path, and a
+    // Brain that will not accept the old credential — the certificate changed,
+    // the console already revoked it — must not block the recovery.
+    if (await _replacedCredential(enrollment.brainOrigin) case final old?) {
+      await _tryRevoke(old);
+    }
     await _vault.write(credential);
+    _catalog = const [];
+    _inFlight.clear();
     _credentialFuture = Future.value(credential);
     return profile;
+  }
+
+  /// The credential [origin] currently holds, if it is readable at all.
+  Future<DeviceCredential?> _replacedCredential(Uri origin) async {
+    try {
+      return await _vault.read(origin);
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Revokes [credential] on its own Brain, reporting only whether the Brain
+  /// confirmed it. Never throws: every caller is cleaning up after something
+  /// that has already been decided.
+  Future<bool> _tryRevoke(DeviceCredential credential) async {
+    try {
+      await _revoke(credential);
+      return true;
+    } on Object {
+      return false;
+    }
   }
 
   static String _randomId() {

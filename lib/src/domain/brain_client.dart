@@ -137,6 +137,27 @@ final class PairingRequest {
   final Uri enrollmentUri;
 }
 
+/// One Brain this Commander holds a device credential for.
+///
+/// Deliberately carries no key material. The private seed stays in the vault
+/// and the data layer; only the identity an operator can already read off the
+/// Brain's own console — origin, device id, label — is describable here.
+final class PairedBrain {
+  const PairedBrain({
+    required this.origin,
+    required this.deviceId,
+    required this.deviceLabel,
+    required this.active,
+  });
+
+  final Uri origin;
+  final String deviceId;
+  final String deviceLabel;
+
+  /// Whether requests are currently signed with this credential.
+  final bool active;
+}
+
 abstract interface class BrainClient {
   Future<BrainProfile> getProfile();
   Future<BrainOverview> getOverview();
@@ -146,7 +167,21 @@ abstract interface class BrainClient {
   Future<List<BrainSetting>> getSettings();
   Future<List<ActivityEvent>> getActivity();
   Future<CommanderJob> submitJob(JobRequest request);
+
+  /// Revokes and removes the pairing currently in use.
   Future<void> forgetPairing();
+
+  /// Every Brain a credential is held for, the active one first.
+  ///
+  /// Pairing a second Brain keeps the first credential, so this is how the
+  /// operator sees what this device can still command.
+  Future<List<PairedBrain>> pairedBrains();
+
+  /// Signs every later request with the credential stored for [origin].
+  Future<BrainProfile> selectPairedBrain(Uri origin);
+
+  /// Revokes this device on [origin], then deletes the local credential.
+  Future<void> removePairedBrain(Uri origin);
 
   /// Exchanges a one-time enrollment for a locally generated, revocable
   /// public-key device identity.

@@ -36,6 +36,21 @@ final class FixtureBrainClient implements BrainClient {
   @override
   Future<void> forgetPairing() async {}
 
+  /// Fixture mode holds no credential, so there is nothing to list, switch
+  /// between, or remove.
+  @override
+  Future<List<PairedBrain>> pairedBrains() async => const [];
+
+  @override
+  Future<void> removePairedBrain(Uri origin) async {}
+
+  @override
+  Future<BrainProfile> selectPairedBrain(Uri origin) {
+    throw UnsupportedError(
+      'This build has no live Brain transport. No pairing was selected.',
+    );
+  }
+
   @override
   Future<BrainProfile> getProfile() => _answer(
     BrainProfile(

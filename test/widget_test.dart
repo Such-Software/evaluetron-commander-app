@@ -190,6 +190,17 @@ class _RecoveringBrainClient implements BrainClient {
   }
 
   @override
+  Future<List<PairedBrain>> pairedBrains() async => const [];
+
+  @override
+  Future<void> removePairedBrain(Uri origin) async {
+    paired = false;
+  }
+
+  @override
+  Future<BrainProfile> selectPairedBrain(Uri origin) => getProfile();
+
+  @override
   Future<List<ActivityEvent>> getActivity() => _fixture.getActivity();
 
   @override

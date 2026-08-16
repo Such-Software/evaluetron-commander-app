@@ -22,6 +22,7 @@ final class CommanderController extends ChangeNotifier {
   List<FleetNode> fleet = const [];
   List<BrainSetting> settings = const [];
   List<ActivityEvent> activity = const [];
+  List<PairedBrain> pairedBrains = const [];
   ManagedNetworkCapability managedNetworkCapability =
       const ManagedNetworkCapability.unsupported();
   TunnelSnapshot tunnel = const TunnelSnapshot.unavailable();
@@ -50,6 +51,7 @@ final class CommanderController extends ChangeNotifier {
             : Future.value(const <ActivityEvent>[]),
       ]);
       profile = loadedProfile;
+      pairedBrains = await _client.pairedBrains();
       overview = values[0] as BrainOverview;
       catalog = values[1] as List<ModelCapability>;
       jobs = values[2] as List<CommanderJob>;
@@ -155,12 +157,31 @@ final class CommanderController extends ChangeNotifier {
     return paired;
   }
 
+  /// Commands a different Brain this device is already paired to.
+  ///
+  /// Gated like every other use of operator authority: it activates a stored
+  /// credential that was not in use a moment ago.
+  Future<void> selectPairedBrain(Uri origin) async {
+    await _stepUp(PrivilegedAction.switchBrain);
+    await _client.selectPairedBrain(origin);
+    await load();
+  }
+
   /// Revokes and removes this Commander.
   ///
   /// Returns the refusal when local authentication did not succeed, so the
   /// caller can show it where the operator asked, instead of dropping the
   /// whole shell into its failure state over a cancelled prompt.
-  Future<LocalAuthRequiredException?> forgetPairing() async {
+  Future<LocalAuthRequiredException?> forgetPairing() =>
+      _removePairing(_client.forgetPairing);
+
+  /// Revokes and removes one paired Brain, which may not be the active one.
+  Future<LocalAuthRequiredException?> removePairing(Uri origin) =>
+      _removePairing(() => _client.removePairedBrain(origin));
+
+  Future<LocalAuthRequiredException?> _removePairing(
+    Future<void> Function() removal,
+  ) async {
     try {
       await _stepUp(PrivilegedAction.revokeAccess);
     } on LocalAuthRequiredException catch (refusal) {
@@ -170,7 +191,7 @@ final class CommanderController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      await _client.forgetPairing();
+      await removal();
     } catch (caught) {
       error = caught;
       loading = false;

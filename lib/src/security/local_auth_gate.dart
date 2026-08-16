@@ -6,7 +6,13 @@ import 'package:local_auth/local_auth.dart';
 /// Every value here grants, uses, or destroys operator authority over the
 /// fleet, so each one is re-authenticated immediately before it runs rather
 /// than relying on a single session-wide unlock.
-enum PrivilegedAction { unlockSession, submitJob, pairBrain, revokeAccess }
+enum PrivilegedAction {
+  unlockSession,
+  submitJob,
+  pairBrain,
+  switchBrain,
+  revokeAccess,
+}
 
 /// Result of asking the operating system to prove the operator is present.
 enum LocalAuthOutcome {
@@ -78,6 +84,7 @@ LocalAuthRequiredException localAuthRefusal(
     PrivilegedAction.unlockSession => 'Unlocking Commander',
     PrivilegedAction.submitJob => 'Submitting a job',
     PrivilegedAction.pairBrain => 'Pairing a Brain',
+    PrivilegedAction.switchBrain => 'Switching to another paired Brain',
     PrivilegedAction.revokeAccess => 'Revoking this Commander',
   };
   return LocalAuthRequiredException(switch (outcome) {
@@ -137,6 +144,8 @@ final class PlatformLocalAuthGate implements LocalAuthGate {
           PrivilegedAction.unlockSession => 'Unlock Evaluetron Commander',
           PrivilegedAction.submitJob => 'Confirm submitting a job to the Brain',
           PrivilegedAction.pairBrain => 'Confirm pairing a new Brain',
+          PrivilegedAction.switchBrain =>
+            'Confirm commanding a different paired Brain',
           PrivilegedAction.revokeAccess =>
             'Confirm revoking this Commander device',
         },

@@ -39,7 +39,7 @@ final class FakeBrainTlsTransport implements BrainTlsTransport {
   final bundles = <String?>[];
 
   /// Request bodies that actually reached the peer.
-  final delivered = <({String path, List<int> body})>[];
+  final delivered = <({Uri url, String path, List<int> body})>[];
 
   /// How many times the certificate was re-inspected.
   int probes = 0;
@@ -63,7 +63,7 @@ final class FakeBrainTlsTransport implements BrainTlsTransport {
       );
     }
     bundles.add(trustBundle);
-    delivered.add((path: url.path, body: body));
+    delivered.add((url: url, path: url.path, body: body));
     return respond(method, url.path, body);
   }
 
