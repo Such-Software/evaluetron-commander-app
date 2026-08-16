@@ -31,6 +31,17 @@ final class CommanderTransportException implements Exception {
 
   /// How long the Brain asked Commander to wait, from `Retry-After`.
   final Duration? retryAfter;
+
+  /// Whether the Brain gave a verdict that retrying the identical request
+  /// cannot change. Used to release a held idempotency key.
+  bool get isDefinitiveRejection => switch (statusCode) {
+    null => false,
+    408 || 429 => false,
+    final status => status >= 400 && status < 500,
+  };
+
+  @override
+  String toString() => message;
 }
 
 final class CommanderBrainClient implements BrainClient {
@@ -56,6 +67,15 @@ final class CommanderBrainClient implements BrainClient {
   final BrainTlsTransport _transport;
   Future<DeviceCredential?>? _credentialFuture;
   List<ModelCapability> _catalog = const [];
+
+  /// Idempotency keys for submissions whose outcome is not yet known, by
+  /// request payload. Insertion-ordered so the oldest is evicted first.
+  ///
+  /// In memory only: this survives a retry within a session, which is the
+  /// case that duplicates jobs today. It does **not** survive the process
+  /// being killed between the timeout and the retry.
+  final _inFlight = <String, String>{};
+  static const _maxInFlight = 32;
 
   /// Reads the stored credential and activates it for this process only after
   /// the operator proves presence to the operating system.
@@ -591,21 +611,34 @@ final class CommanderBrainClient implements BrainClient {
     }
     final params = <String, dynamic>{capability.parameterName: request.input};
     if (capability.model case final model?) params['model'] = model;
-    final requestId = _randomId();
-    final body = utf8.encode(
-      jsonEncode({
-        'generator': capability.id,
-        'params': params,
-        'requestId': requestId,
-      }),
-    );
-    final response = await _request(
-      origin: credential.brainOrigin,
-      method: 'POST',
-      path: '/api/commander/v1/jobs',
-      body: body,
-      credential: credential,
-    );
+    final payload = {'generator': capability.id, 'params': params};
+    // The Brain deduplicates on requestId. Minting a fresh one per call
+    // defeated that: a submission that timed out after the Brain had already
+    // accepted it produced a second job when the operator tried again. The
+    // same logical submission therefore keeps its key until the Brain gives a
+    // verdict that a retry cannot change.
+    final key = jsonEncode(payload);
+    final requestId = _inFlight.putIfAbsent(key, _randomId);
+    if (_inFlight.length > _maxInFlight) {
+      _inFlight.remove(_inFlight.keys.first);
+    }
+    final body = utf8.encode(jsonEncode({...payload, 'requestId': requestId}));
+    final Map<String, dynamic> response;
+    try {
+      response = await _request(
+        origin: credential.brainOrigin,
+        method: 'POST',
+        path: '/api/commander/v1/jobs',
+        body: body,
+        credential: credential,
+      );
+    } on CommanderTransportException catch (error) {
+      // A timeout, a network drop, or a 5xx leaves the outcome unknown, so
+      // the key is held for the retry. A definitive refusal releases it.
+      if (error.isDefinitiveRejection) _inFlight.remove(key);
+      rethrow;
+    }
+    _inFlight.remove(key);
     return _job(_map(response['job']));
   }
 

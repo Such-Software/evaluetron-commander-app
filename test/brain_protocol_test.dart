@@ -82,6 +82,13 @@ _paired() async {
   return (client: client, transport: transport);
 }
 
+List<String> _requestIds(FakeBrainTlsTransport transport) => [
+  for (final call in transport.delivered)
+    if (call.path == '/api/commander/v1/jobs' && call.body.isNotEmpty)
+      (jsonDecode(utf8.decode(call.body)) as Map<String, dynamic>)['requestId']
+          as String,
+];
+
 void main() {
   group('the Brain\'s own error text reaches the operator', () {
     test('a rejected enrollment says why', () async {
@@ -214,6 +221,83 @@ void main() {
               .having((e) => e.message.length, 'length', lessThan(260)),
         ),
       );
+    });
+  });
+
+  group('job submission is idempotent across retries', () {
+    test('a retry after an unknown outcome reuses the request id', () async {
+      final setup = await _paired();
+      const job = JobRequest(capabilityId: 'llm-grounded', input: 'hello');
+      await setup.client.getCatalog();
+
+      setup.transport.respond = (method, path, body) => path.endsWith('/jobs')
+          ? jsonResponse({
+              'ok': false,
+              'error': 'upstream down',
+            }, statusCode: 503)
+          : _ok(path);
+      await expectLater(setup.client.submitJob(job), throwsA(isA<Exception>()));
+
+      setup.transport.respond = (method, path, body) => _ok(path);
+      await setup.client.submitJob(job);
+
+      final ids = _requestIds(setup.transport);
+      expect(ids, hasLength(2));
+      expect(ids.first, ids.last, reason: 'the Brain must dedupe the retry');
+    });
+
+    test('a definitive refusal releases the key', () async {
+      final setup = await _paired();
+      const job = JobRequest(capabilityId: 'llm-grounded', input: 'hello');
+      await setup.client.getCatalog();
+
+      setup.transport.respond = (method, path, body) => path.endsWith('/jobs')
+          ? jsonResponse({
+              'ok': false,
+              'error': 'input rejected',
+            }, statusCode: 400)
+          : _ok(path);
+      await expectLater(setup.client.submitJob(job), throwsA(isA<Exception>()));
+
+      setup.transport.respond = (method, path, body) => _ok(path);
+      await setup.client.submitJob(job);
+
+      final ids = _requestIds(setup.transport);
+      expect(ids, hasLength(2));
+      expect(ids.first, isNot(ids.last));
+    });
+
+    test('a deliberate resubmission after success is a new job', () async {
+      final setup = await _paired();
+      const job = JobRequest(capabilityId: 'llm-grounded', input: 'hello');
+      await setup.client.getCatalog();
+
+      await setup.client.submitJob(job);
+      await setup.client.submitJob(job);
+
+      final ids = _requestIds(setup.transport);
+      expect(ids, hasLength(2));
+      expect(ids.first, isNot(ids.last));
+    });
+
+    test('different submissions never share a key', () async {
+      final setup = await _paired();
+      await setup.client.getCatalog();
+
+      setup.transport.respond = (method, path, body) => path.endsWith('/jobs')
+          ? jsonResponse({'ok': false}, statusCode: 503)
+          : _ok(path);
+      for (final input in const ['one', 'two']) {
+        await expectLater(
+          setup.client.submitJob(
+            JobRequest(capabilityId: 'llm-grounded', input: input),
+          ),
+          throwsA(isA<Exception>()),
+        );
+      }
+
+      final ids = _requestIds(setup.transport);
+      expect(ids.toSet(), hasLength(2));
     });
   });
 }
