@@ -16,7 +16,7 @@ final class FakeLocalAuthGate implements LocalAuthGate {
       FakeLocalAuthGate(outcome: LocalAuthOutcome.notEnrolled, enrolled: false);
 
   /// A platform with no local authentication implementation at all, such as
-  /// Linux desktop. Permits the action and reports the session unprotected.
+  /// Missing platform integration. Refuses operator authority.
   factory FakeLocalAuthGate.unsupportedPlatform() => FakeLocalAuthGate(
     outcome: LocalAuthOutcome.unsupportedPlatform,
     enrolled: false,

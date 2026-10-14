@@ -7,11 +7,18 @@ import 'package:evaluetron_commander_app/src/security/local_auth_gate.dart';
 import 'package:evaluetron_commander_app/src/security/secure_credential_vault.dart';
 import 'package:evaluetron_commander_app/src/state/commander_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:local_auth/local_auth.dart';
 
 import 'support/fake_local_auth_gate.dart';
 import 'support/memory_pin_store.dart';
 import 'support/memory_secure_storage.dart';
+
+class _MissingAuthenticator extends LocalAuthentication {
+  @override
+  Future<bool> isDeviceSupported() async => throw MissingPluginException();
+}
 
 final _credential = DeviceCredential(
   brainOrigin: Uri(scheme: 'https', host: 'brain.example.com'),
@@ -73,25 +80,37 @@ void main() {
     );
 
     test(
-      'a platform with no authenticator stays usable instead of bricking',
+      'a platform with no authenticator refuses operator authority',
       () async {
-        // Linux desktop ships no local_auth implementation, so no operator
-        // action can produce a presence proof. Failing closed there would not
-        // add security -- the desktop login is the barrier, as it was before
-        // this gate existed -- it would only make a supported target unusable.
-        // The session is reported unprotected instead.
         final client = _RecordingBrainClient();
         final gate = FakeLocalAuthGate.unsupportedPlatform();
 
-        await _controller(client, gate).submitJob(
-          const JobRequest(capabilityId: 'llm-grounded', input: 'hello'),
+        await expectLater(
+          _controller(client, gate).submitJob(
+            const JobRequest(capabilityId: 'llm-grounded', input: 'hello'),
+          ),
+          throwsA(isA<LocalAuthRequiredException>()),
         );
 
         expect(gate.requested, [PrivilegedAction.submitJob]);
-        expect(client.submitted, hasLength(1));
-        expect(localAuthPermits(LocalAuthOutcome.unsupportedPlatform), isTrue);
+        expect(client.submitted, isEmpty);
+        expect(localAuthPermits(LocalAuthOutcome.unsupportedPlatform), isFalse);
         expect(localAuthPermits(LocalAuthOutcome.notEnrolled), isFalse);
         expect(localAuthPermits(LocalAuthOutcome.rejected), isFalse);
+      },
+    );
+
+    test(
+      'missing native integration never permits a privileged action',
+      () async {
+        final gate = PlatformLocalAuthGate(
+          authentication: _MissingAuthenticator(),
+        );
+        for (final action in PrivilegedAction.values) {
+          final outcome = await gate.authenticate(action);
+          expect(outcome, LocalAuthOutcome.unsupportedPlatform);
+          expect(localAuthPermits(outcome), isFalse);
+        }
       },
     );
 
