@@ -32,20 +32,17 @@ enum LocalAuthOutcome {
   /// This platform has no local authentication implementation at all, so no
   /// amount of operator configuration can produce a presence proof.
   ///
-  /// Distinct from [notEnrolled] on purpose. Failing closed here would not add
-  /// security -- the desktop session login is the barrier, exactly as it was
-  /// before this gate existed -- it would only make the app unusable on a
-  /// supported target. Callers proceed and mark the session unprotected so the
-  /// reduced protection is visible rather than assumed.
+  /// Distinct from [notEnrolled]: installing an authenticator is required,
+  /// rather than enrolling a screen lock. Missing integration never authorizes
+  /// an operator action, including on desktop platforms.
   unsupportedPlatform,
 }
 
 /// Whether [outcome] permits a privileged action to run.
 ///
-/// Presence was proven, or this platform cannot prove presence at all.
+/// Only a fresh presence proof permits operator authority.
 bool localAuthPermits(LocalAuthOutcome outcome) =>
-    outcome == LocalAuthOutcome.authenticated ||
-    outcome == LocalAuthOutcome.unsupportedPlatform;
+    outcome == LocalAuthOutcome.authenticated;
 
 /// Raised when a privileged action was refused because local authentication
 /// did not succeed. The message is operator-facing.
@@ -97,7 +94,8 @@ LocalAuthRequiredException localAuthRefusal(
       '$subject requires a device screen lock. Enrol a biometric, PIN, '
           'pattern, or password in system settings and try again.',
     LocalAuthOutcome.unsupportedPlatform =>
-      '$subject was refused although this platform cannot check user presence.',
+      '$subject requires a platform authenticator. This build cannot check '
+          'user presence; use a supported device with authentication installed.',
   }, outcome: outcome);
 }
 
@@ -176,9 +174,7 @@ final class PlatformLocalAuthGate implements LocalAuthGate {
 
 /// Gate for builds with no platform authenticator.
 ///
-/// Reports [LocalAuthOutcome.unsupportedPlatform] rather than a refusal, so the
-/// app stays usable where presence cannot be checked while still telling the
-/// operator the session is unprotected.
+/// Reports [LocalAuthOutcome.unsupportedPlatform], which refuses authority.
 final class UnavailableLocalAuthGate implements LocalAuthGate {
   const UnavailableLocalAuthGate();
 

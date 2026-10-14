@@ -111,14 +111,11 @@ have different remedies.
 operator has not set a screen lock or biometric. The gate **fails closed** and
 says so; the remedy is to enrol one.
 
-`LocalAuthOutcome.unsupportedPlatform` means the platform ships no `local_auth`
-implementation at all — Linux desktop today. No operator action can produce a
-proof there, so refusing would not add security: the desktop session login is
-the barrier, exactly as it was before this gate existed. It would only make a
-supported target unusable. The action proceeds and the shell shows a persistent
-banner that the session is unprotected, so the reduced protection is visible
-rather than assumed. Treat a Linux Commander as being only as protected as the
-desktop login, and prefer a phone for operator authority.
+`LocalAuthOutcome.unsupportedPlatform` means this build cannot obtain a presence
+proof. It refuses operator actions, including on Linux desktop. Fixture mode
+remains available. A missing plugin on Android, iOS, macOS, or Windows is also a
+refusal, never evidence for a desktop-login exception. Live Linux support needs
+a reviewed platform authenticator before it can acquire operator authority.
 
 A cancelled or failed prompt is always a refusal. Neither missing-proof case is
 ever reported as authenticated.
